@@ -23,23 +23,32 @@ function makeFilename(ext: MediaExtension): string {
   return `${crypto.randomUUID()}.${ext}`;
 }
 
+function detectImageExtension(buf: Buffer): Exclude<MediaExtension, "mp4"> {
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "png";
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "jpg";
+  if (buf.length >= 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "webp";
+  throw new Error("Image provider returned invalid or unsupported image bytes");
+}
+
 export async function saveMediaBuffer(
   buf: Buffer,
   ext: MediaExtension
 ): Promise<string> {
   if (buf.length === 0) throw new Error("Generated media buffer is empty");
-  const filename = makeFilename(ext);
 
   if (ext !== "mp4") {
+    const imageExt = detectImageExtension(buf);
+    const filename = makeFilename(imageExt);
     await ensureDbSchema();
     const id = filename.slice(0, filename.lastIndexOf("."));
     await pool.query(
       `INSERT INTO "generated_media" ("id", "data", "contentType") VALUES ($1, $2, $3)`,
-      [id, buf, contentTypeFor(ext)]
+      [id, buf, contentTypeFor(imageExt)]
     );
     return `/api/media/${filename}`;
   }
 
+  const filename = makeFilename(ext);
   await fs.mkdir(MEDIA_DIR, { recursive: true });
   await fs.writeFile(path.join(MEDIA_DIR, filename), buf);
   return `/api/media/${filename}`;
