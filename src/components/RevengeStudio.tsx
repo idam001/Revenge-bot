@@ -18,7 +18,6 @@ import {
   Download,
   Edit3,
   Camera,
-  ExternalLink,
   FileText,
   Film,
   FlaskConical,
@@ -87,6 +86,7 @@ import { PromptArsenalModal } from "./PromptArsenalModal";
 import { SparkIcon } from "./SparkIcon";
 import { FeatureLab } from "./FeatureLab";
 import { AgentWorkspace } from "./AgentWorkspace";
+import { ResearchWorkspace } from "./ResearchWorkspace";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { DEFAULT_FLAGS } from "@/lib/feature-catalog";
 
@@ -121,6 +121,7 @@ interface UIMessage {
   isThinking?: boolean;
   isSearching?: boolean;
   searchQuery?: string | null;
+  researchAttempted?: boolean;
   toolRuns?: ChatToolRun[] | null;
 }
 
@@ -1257,7 +1258,7 @@ export function RevengeStudio() {
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === targetId
-                  ? { ...m, webSources: evt.sources, isSearching: false }
+                  ? { ...m, webSources: evt.sources, isSearching: false, researchAttempted: true }
                   : m
               )
             );
@@ -1266,14 +1267,14 @@ export function RevengeStudio() {
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === targetId
-                  ? { ...m, isSearching: true, searchQuery: q }
+                  ? { ...m, isSearching: true, searchQuery: q, researchAttempted: true }
                   : m
               )
             );
           } else if (evt.type === "search_empty") {
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === targetId ? { ...m, isSearching: false } : m
+                m.id === targetId ? { ...m, isSearching: false, researchAttempted: true } : m
               )
             );
           } else if (evt.type === "meta" && evt.providerUsed) {
@@ -2648,53 +2649,17 @@ export function RevengeStudio() {
 
                     return (
                       <div key={msg.id} className="space-y-3">
-                        {msg.isSearching && (
-                          <div className="flex items-center gap-2 text-[13px] text-[var(--text-secondary)]">
-                            <span className="relative flex h-2.5 w-2.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
-                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-                            </span>
-                            <Globe className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>
-                              Searching the live web
-                              {msg.searchQuery ? (
-                                <>
-                                  {" "}for “{msg.searchQuery.slice(0, 60)}
-                                  {msg.searchQuery.length > 60 ? "…" : ""}”
-                                </>
-                              ) : (
-                                "…"
-                              )}
-                            </span>
-                          </div>
-                        )}
-
-                        {msg.webSources && msg.webSources.length > 0 && (
-                          <div>
-                            <div className="flex items-center gap-1.5 text-[12px] text-emerald-400 font-medium mb-1.5">
-                              <Globe className="w-3.5 h-3.5" />
-                              Live web results ({msg.webSources.length} sources)
-                            </div>
-                            <div className="flex gap-2 overflow-x-auto pb-1">
-                              {msg.webSources.map((src, i) => (
-                              <a
-                                key={i}
-                                href={src.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="shrink-0 w-52 p-2.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)]"
-                              >
-                                <div className="text-[12.5px] font-medium text-[var(--text-primary)] truncate flex items-center justify-between gap-1">
-                                  <span className="truncate">{src.title}</span>
-                                  <ExternalLink className="w-3 h-3 text-[var(--accent)] shrink-0" />
-                                </div>
-                                <p className="text-[11.5px] text-[var(--text-muted)] line-clamp-2 mt-0.5">
-                                  {src.snippet}
-                                </p>
-                              </a>
-                              ))}
-                            </div>
-                          </div>
+                        {(msg.researchAttempted || (msg.webSources && msg.webSources.length > 0)) && (
+                          <ResearchWorkspace
+                            key={msg.id}
+                            messageId={msg.id}
+                            query={msg.searchQuery || "Live web research"}
+                            answer={msg.content}
+                            sources={msg.webSources || []}
+                            isSearching={msg.isSearching}
+                            isStreaming={msg.isStreaming}
+                            attempted={msg.researchAttempted}
+                          />
                         )}
 
                         {(hasThought || msg.isThinking) && (

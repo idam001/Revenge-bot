@@ -33,12 +33,14 @@ Chat history/search, sharing, memory, web search, voice input, image/video gener
 - Use a durable worker/queue rather than relying on a single browser SSE connection or a Vercel request staying alive.
 - Show a notification only after a job is complete or needs user input.
 
-### Phase 4 — Research mode (item 5)
+### Phase 4 — Research workspace (recommended upgrade 4; selected scope item 5)
 
-- Extend existing web grounding into multi-step research: editable query plan → iterative search/read → synthesis.
-- Cite claims inline and provide source cards with title, URL, date, and excerpt.
-- Let users inspect sources, remove a source, redirect research, and export the final report.
-- Keep ordinary web search as the fast path; research is explicit and visibly takes longer.
+- [x] Add an in-chat research workspace with visible search → evidence review → synthesis progress.
+- [x] Visually separate the assistant's synthesis from retrieved source previews; show source domains, links, and excerpts for inspection.
+- [x] Let users manually flag sources for comparison and export the answer, sources, previews, and flags as a Markdown report.
+- [ ] Add an editable query plan, source removal, and controls to redirect research.
+- [ ] Add explicit claim-to-source attribution, stronger disagreement analysis, and multi-step iterative search/read; never present a heuristic as a verified contradiction.
+- Keep ordinary web search as the fast path; research should be explicit and visibly take longer.
 
 ### Phase 5 — Model Council (item 6)
 
@@ -77,9 +79,11 @@ Chat history/search, sharing, memory, web search, voice input, image/video gener
 - No secrets enter client bundles, logs, source snapshots, or generated artifacts.
 - Verify the deployed build and its key user flows before calling the phase done.
 
-## Status
+## Status (2026-11-04)
 
 - Scope and MCP plugin direction recorded.
-- Phase 1 groundwork is implemented locally: automatic before/after sandbox snapshots, post-run diff review, and restore-to-before-run endpoint/UI. It typechecks, the production build passes, and the tar/diff/restore shell fixture passes. A live E2B execution has not yet been exercised.
-- Existing feature audit: Arena mode already compares a second model (item 6); web grounding already searches multiple sources, but lacks the editable, multi-step research workflow (item 5); memory exists at account scope, but not with project-only isolation and source controls (item 10).
-- Not yet deployed to Vercel. Next: finish Phase 1 approval/history semantics and E2B integration test, then Phase 2 visual testing and durable jobs.
+- Current production deployment before this research-workspace change: `dpl_7973jGj2FAWe3FHLBrg68KhT77Ms` (READY/PROMOTED). Production `/`, `/chat`, and `/api/health` returned 200; unauthenticated provider and agent endpoints returned the expected 401. The authenticated E2B restore flow still needs an end-to-end test.
+- Phase 1 review/undo is deployed, but remains post-run sandbox review rather than a pre-mutation approval gate; see the caveat above.
+- Research workspace is implemented locally: real search/source/synthesis progress states, source inspection, clearly separated synthesis vs. evidence previews, manual comparison flags, and Markdown report export. The new component passes focused ESLint, TypeScript, and production-build checks. End-to-end interactive browser and production checks are pending. The source-snapshot upload attempt was denied by Supabase Storage RLS using the local anon key, so this change is not deployed.
+- Existing feature audit: Arena mode already compares a second model (item 6); web grounding already searches multiple sources (item 5); memory exists at account scope, but not with project-only isolation and source controls (item 10).
+- Remaining selected upgrades are staged in the phases above. No visual browser-test runner, durable-job service, document parser, MCP connector manager, or project-scoped memory has been shipped.
