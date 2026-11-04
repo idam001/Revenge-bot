@@ -12,7 +12,7 @@ import {
 import { runAgentLoop, type AgentEvent, type SavedProviderConfig } from "@/lib/agent-loop";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 600;
+export const maxDuration = 300; // Vercel Hobby caps serverless functions at 300s
 
 interface CancelState {
   cancelled: boolean;
