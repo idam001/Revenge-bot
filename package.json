@@ -13,6 +13,7 @@
     "dotenv": "17.3.1",
     "drizzle-orm": "0.45.2",
     "e2b": "^2.62.2",
+    "jose": "^6.2.15",
     "js-beautify": "^2.0.3",
     "jszip": "^3.10.2",
     "lucide-react": "^1.66.0",
