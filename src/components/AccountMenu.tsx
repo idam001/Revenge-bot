@@ -126,7 +126,7 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
           type="button"
           onClick={handleSignIn}
           disabled={busy || !authConfigured}
-          className="group flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--text-primary)] px-3 py-2.5 text-[13.5px] font-semibold text-[var(--bg-main)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rg-google-btn group flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[13.5px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? (
             <Loader2 className="h-4 w-4 animate-spin" />

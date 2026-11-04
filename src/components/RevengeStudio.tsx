@@ -1602,10 +1602,19 @@ export function RevengeStudio() {
     return (
       <div key={conv.id} className="relative group">
         <div
+          role="button"
+          tabIndex={0}
+          aria-current={active ? "true" : undefined}
           onClick={() => void handleSelectConversation(conv)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              void handleSelectConversation(conv);
+            }
+          }}
           className={`flex items-center justify-between gap-1 pl-3 pr-1 h-9 rounded-lg text-[13.5px] cursor-pointer transition ${
             active
-              ? "bg-[var(--bg-elevated-2)] text-[var(--text-primary)]"
+              ? "bg-[var(--bg-elevated-2)] text-[var(--text-primary)] shadow-[inset_2px_0_0_0_var(--accent)]"
               : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
           }`}
         >
@@ -2084,7 +2093,7 @@ export function RevengeStudio() {
             void processFiles(Array.from(e.dataTransfer.files));
           }
         }}
-        className={`rounded-[22px] bg-[var(--bg-elevated)] claude-composer-shadow focus-within:shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.2),0_0_0_1px_var(--border-strong)] transition ${
+        className={`rg-composer rounded-[22px] bg-[var(--bg-elevated)] claude-composer-shadow focus-within:shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.2),0_0_0_1px_var(--border-strong)] transition ${
           dragActive ? "ring-2 ring-[var(--accent)]" : ""
         }`}
       >
@@ -2210,7 +2219,10 @@ export function RevengeStudio() {
                   reasoningEffort: thinkingOn ? "off" : "high",
                 })
               }
-              className={`h-9 px-2.5 rounded-lg flex items-center gap-1.5 text-[13px] border transition cursor-pointer ${
+              title={thinkingOn ? "Extended thinking is ON" : "Turn on extended thinking"}
+              className={`shrink-0 h-9 rounded-lg flex items-center justify-center gap-1.5 text-[13px] border transition cursor-pointer ${
+                thinkingOn ? "px-2.5" : "w-9"
+              } ${
                 thinkingOn
                   ? "bg-[var(--accent-soft)] border-[var(--accent)]/30 text-[var(--accent)]"
                   : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-elevated-2)]"
@@ -2293,6 +2305,7 @@ export function RevengeStudio() {
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-[var(--bg-main)] text-[var(--text-primary)]">
+      <a href="#rg-thread" className="rg-skip">Skip to conversation</a>
       {!isDesktop && mobileNavOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/55"
@@ -2302,7 +2315,7 @@ export function RevengeStudio() {
       {sidebar}
 
       <div className="flex-1 flex min-w-0 h-full">
-        <main className="flex-1 flex flex-col min-w-0 h-full relative">
+        <main id="rg-thread" className="flex-1 flex flex-col min-w-0 h-full relative">
           {/* Header */}
           <header
             className="shrink-0 flex items-center justify-between gap-2 px-2.5 sm:px-4"
@@ -2786,6 +2799,9 @@ export function RevengeStudio() {
                           />
                         ) : msg.isStreaming && !msg.isThinking ? (
                           <SparkIcon size={20} className="text-[var(--accent)] animate-pulse" />
+                        ) : null}
+                        {msg.isStreaming && msg.content ? (
+                          <span className="rg-caret" aria-hidden="true" />
                         ) : null}
 
                         {flags.followups && (followUps[msg.id]?.length ?? 0) > 0 && (
