@@ -337,6 +337,21 @@ function timeGreeting(): string {
   return "Good evening";
 }
 
+/**
+ * The name to greet. Comes from the account that is actually signed in:
+ * the Google display name, else the email local-part, title-cased.
+ * Guests get no name at all — never somebody else's.
+ */
+function displayNameFor(user: { name?: string | null; email?: string | null } | null): string {
+  if (!user) return "";
+  const raw = (user.name || "").trim() || (user.email || "").split("@")[0] || "";
+  if (!raw) return "";
+  const cleaned = raw.replace(/[._-]+/g, " ").replace(/\s+/g, " ").trim();
+  const first = cleaned.split(" ")[0] || "";
+  if (!first) return "";
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
 export function RevengeStudio() {
   const [theme, setTheme] = useState<"claude-dark" | "claude-light">(
     "claude-dark"
@@ -412,6 +427,7 @@ export function RevengeStudio() {
   const [arsenalOpen, setArsenalOpen] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [greeting, setGreeting] = useState("Welcome back");
+  const [accountUser, setAccountUser] = useState<{ name?: string | null; email?: string | null } | null>(null);
   const [showJump, setShowJump] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -431,6 +447,11 @@ export function RevengeStudio() {
     [selectedPersonaId]
   );
   const activeConv = conversations.find((c) => c.id === activeConvId) ?? null;
+
+  const greetLine = useMemo(() => {
+    const who = displayNameFor(accountUser);
+    return who ? `${greeting}, ${who}` : greeting;
+  }, [greeting, accountUser]);
 
   const threadArtifacts = useMemo(() => {
     const out: CanvasArtifactPayload[] = [];
@@ -454,6 +475,29 @@ export function RevengeStudio() {
     sync();
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAccount = async () => {
+      try {
+        const res = await apiFetch("/api/auth/me");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          user?: { name?: string | null; email?: string | null } | null;
+        };
+        if (!cancelled) setAccountUser(data.user ?? null);
+      } catch {
+        /* stay signed out */
+      }
+    };
+    void loadAccount();
+    const onAuth = () => void loadAccount();
+    window.addEventListener("revenge:auth-changed", onAuth);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("revenge:auth-changed", onAuth);
+    };
   }, []);
 
   useEffect(() => {
@@ -2420,7 +2464,7 @@ export function RevengeStudio() {
                   <div className="flex items-center justify-center gap-3">
                     <SparkIcon size={34} className="text-[var(--accent)] shrink-0" />
                     <h1 className="font-claude-serif text-[30px] sm:text-[40px] leading-tight text-[var(--text-primary)] tracking-tight">
-                      {greeting}, Idam
+                      {greetLine}
                     </h1>
                   </div>
 

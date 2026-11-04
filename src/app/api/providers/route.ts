@@ -35,6 +35,86 @@ function hasServerEnvKey(providerId: string): boolean {
   return (envMap[providerId] ?? []).some((k) => Boolean(process.env[k]?.trim()));
 }
 
+type ProbeResult = { ok: boolean; latencyMs: number; status?: number; error?: string };
+
+/** Send one tiny completion with the given key. Shared by save and test. */
+async function probeProvider(
+  providerId: string,
+  def: (typeof CLOUD_PROVIDERS)[number],
+  apiKey: string,
+  baseUrl: string,
+  customModelId: string
+): Promise<ProbeResult> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const testModel =
+      providerId === "custom" ? customModelId || def.defaultTestModel : def.defaultTestModel;
+    let res: Response;
+    if (def.protocol === "anthropic") {
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: testModel,
+          max_tokens: 8,
+          messages: [{ role: "user", content: "Hi" }],
+        }),
+        signal: controller.signal,
+      });
+    } else {
+      const cleanBase = baseUrl.replace(/\/+$/, "");
+      res = await fetch(`${cleanBase}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model: testModel,
+          max_tokens: 8,
+          messages: [{ role: "user", content: "Hi" }],
+        }),
+        signal: controller.signal,
+      });
+    }
+    const latencyMs = Date.now() - start;
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      return { ok: false, latencyMs, status: res.status, error: friendlifyProviderError(res.status, txt) };
+    }
+    return { ok: true, latencyMs, status: res.status };
+  } catch (e) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      error: e instanceof Error ? e.message : "Connection timeout",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Turn a provider's raw error body into something a person can act on. */
+function friendlifyProviderError(status: number, raw: string): string {
+  const txt = raw.toLowerCase();
+  if (status === 401 || status === 403 || /api key not valid|invalid.*key|unauthorized/.test(txt)) {
+    return "That key was rejected. Copy it again from the provider dashboard — it may be truncated or revoked.";
+  }
+  if (status === 404 || /no longer available|not found|unsupported model/.test(txt)) {
+    return "The key is fine, but this model name is retired at the provider. Pick a newer model in the list.";
+  }
+  if (status === 429 || /quota|rate limit/.test(txt)) {
+    return "The key works but this account is out of quota right now. Try again later or use another provider.";
+  }
+  return `HTTP ${status}: ${raw.slice(0, 160)}`;
+}
+
 export async function GET(req: Request) {
   try {
     await ensureDbSchema();
@@ -158,6 +238,21 @@ export async function POST(req: Request) {
         );
       }
 
+      // Verify before storing so a bad key fails loudly here, not later in chat.
+      const probe = await probeProvider(providerId, def, effectiveKey, effectiveBaseUrl, effectiveModel);
+      if (!probe.ok && providerId !== "custom") {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: probe.error,
+            code: "KEY_REJECTED",
+            latencyMs: probe.latencyMs,
+          },
+          { status: 400 }
+        );
+      }
+      // Some providers retire model names constantly. Remember the probe result
+      // so the UI can show a real "verified" state.
       if (existing) {
         await db
           .update(providerKeys)
@@ -166,21 +261,30 @@ export async function POST(req: Request) {
             baseUrl: effectiveBaseUrl,
             customModelId: effectiveModel,
             enabled: typeof body.enabled === "boolean" ? body.enabled : existing.enabled,
+            lastVerifiedAt: probe.ok ? new Date() : existing.lastVerifiedAt,
             updatedAt: new Date(),
           })
           .where(and(eq(providerKeys.providerId, providerId), eq(providerKeys.ownerKey, owner.key)));
       } else {
         await db.insert(providerKeys).values({
+          ownerKey: owner.key,
           providerId,
           apiKey: effectiveKey,
           baseUrl: effectiveBaseUrl,
           customModelId: effectiveModel,
           enabled: true,
+          lastVerifiedAt: probe.ok ? new Date() : null,
         });
       }
       return NextResponse.json({
         ok: true,
         maskedKey: maskApiKey(effectiveKey),
+        latencyMs: probe.latencyMs,
+        verified: probe.ok,
+        warning: probe.ok ? undefined : probe.error,
+        message: probe.ok
+          ? `Key verified and saved — ${def.name} answered in ${probe.latencyMs}ms.`
+          : "Key saved, but it could not be verified yet.",
       });
     }
 

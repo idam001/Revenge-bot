@@ -181,6 +181,12 @@ export async function ensureDbSchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS "memories_owner_idx" ON "memories" ("ownerKey");
         CREATE INDEX IF NOT EXISTS "provider_keys_owner_idx" ON "provider_keys" ("ownerKey");
 
+        -- API keys are per account. The old global UNIQUE("providerId") let the
+        -- first account to add Gemini/OpenAI lock out every other account.
+        ALTER TABLE "provider_keys" DROP CONSTRAINT IF EXISTS "provider_keys_providerId_key";
+        CREATE UNIQUE INDEX IF NOT EXISTS "provider_keys_owner_provider_uidx"
+          ON "provider_keys" ("ownerKey", "providerId");
+
         -- Guest→account merge bookkeeping (idempotent, safe to re-run)
         CREATE TABLE IF NOT EXISTS "guest_merges" (
           "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),

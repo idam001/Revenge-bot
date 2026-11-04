@@ -1,9 +1,132 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  makeSignInChallenge,
+  challengePasses,
+  type SignInChallenge,
+} from "@/lib/auth-client";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type Status = "checking" | "ready" | "signed-out";
+
+/* ------------------------------------------------------------------ */
+/*  Sign-in human check                                                */
+/* ------------------------------------------------------------------ */
+
+/** Cloudflare Turnstile site key, if the deployment configured one. */
+const TURNSTILE_SITE_KEY =
+  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY) || "";
+
+/**
+ * A small proof-of-human step before OAuth.
+ *
+ * Supabase does not CAPTCHA-check Google OAuth callbacks, so bot volume has to be
+ * stopped before the redirect. When NEXT_PUBLIC_TURNSTILE_SITE_KEY is set we use
+ * Cloudflare Turnstile (free, usually invisible); otherwise this self-contained
+ * challenge runs with no external dependency and no key.
+ */
+function HumanCheck({
+  onVerified,
+}: {
+  onVerified: (token: string | null) => void;
+}) {
+  const [challenge, setChallenge] = useState<SignInChallenge>(() => makeSignInChallenge());
+  const [typed, setTyped] = useState("");
+  const [shake, setShake] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const holderRef = useRef<HTMLDivElement>(null);
+
+  // Turnstile path (only when a site key exists).
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY || !holderRef.current) return;
+    const scriptId = "cf-turnstile-script";
+    if (!document.getElementById(scriptId)) {
+      const script = document.createElement("script");
+      script.id = scriptId;
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+    const render = () => {
+      const w = window as unknown as { turnstile?: { render: (el: HTMLElement, o: Record<string, unknown>) => void } };
+      if (!w.turnstile || !holderRef.current) return;
+      w.turnstile.render(holderRef.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: (token: string) => {
+          setTurnstileToken(token);
+          onVerified(token);
+        },
+      });
+    };
+    const timer = window.setInterval(render, 400);
+    return () => window.clearInterval(timer);
+  }, [onVerified]);
+
+  if (TURNSTILE_SITE_KEY) {
+    return (
+      <div className="mt-4">
+        <div ref={holderRef} />
+        {!turnstileToken && (
+          <p className="mt-2 text-center text-[11.5px] text-[var(--text-secondary)]">
+            Confirming you are human…
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (challengePasses(challenge, typed)) {
+      onVerified(null);
+      return;
+    }
+    setShake(true);
+    setTyped("");
+    setChallenge(makeSignInChallenge());
+    window.setTimeout(() => setShake(false), 400);
+  };
+
+  return (
+    <form onSubmit={submit} className="mt-4">
+      <label
+        htmlFor="human-check"
+        className="block text-[12.5px] text-[var(--text-secondary)]"
+      >
+        Quick check before we send you to Google — type this word:
+      </label>
+      <div className="mt-2 flex items-stretch gap-2">
+        <div
+          aria-label="Challenge word"
+          className="select-none rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3.5 py-2 font-mono text-[15px] tracking-[0.18em] text-[var(--text-primary)]"
+        >
+          {challenge.display}
+        </div>
+        <input
+          id="human-check"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          className={`min-w-0 flex-1 rounded-lg border bg-[var(--bg-main)] px-3 py-2 text-[14px] text-[var(--text-primary)] outline-none transition focus:border-[var(--accent)] ${
+            shake ? "border-red-400" : "border-[var(--border-strong)]"
+          }`}
+          placeholder="the word above"
+        />
+        <button
+          type="submit"
+          className="rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition hover:border-[var(--accent)]"
+        >
+          Verify
+        </button>
+      </div>
+    </form>
+  );
+}
+
 
 /**
  * Moves any conversations saved under the pre-gate anonymous scope onto this
@@ -32,6 +155,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>("checking");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [humanVerified, setHumanVerified] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -120,10 +244,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           </p>
         </div>
 
+        <HumanCheck onVerified={() => setHumanVerified(true)} />
+
         <button
           type="button"
           onClick={() => void handleSignIn()}
-          disabled={busy}
+          disabled={busy || !humanVerified}
           className="flex w-full items-center justify-center gap-3 rounded-xl px-4 py-3 text-[14px] font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
           style={{
             background: "#ffffff",
@@ -154,7 +280,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
               />
             </svg>
           )}
-          {busy ? "Redirecting to Google…" : "Continue with Google"}
+          {busy ? "Redirecting to Google…" : humanVerified ? "Continue with Google" : "Verify above to continue"}
         </button>
 
         {error && (

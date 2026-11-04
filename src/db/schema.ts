@@ -61,7 +61,9 @@ export const messages = pgTable("messages", {
 export const providerKeys = pgTable("provider_keys", {
   id: uuid("id").defaultRandom().primaryKey(),
   ownerKey: text("ownerKey").notNull().default("legacy:public"),
-  providerId: text("providerId").notNull().unique(),
+  // Not globally unique: every account may connect the same provider with its
+  // own key. The (ownerKey, providerId) pair is what must be unique.
+  providerId: text("providerId").notNull(),
   apiKey: text("apiKey").notNull(),
   baseUrl: text("baseUrl"),
   customModelId: text("customModelId"),

@@ -17,7 +17,16 @@ import {
   ShieldCheck,
   Loader2,
 } from "lucide-react";
-import { fetchMe, signInWithGoogle, signOut, type ClientUser } from "@/lib/auth-client";
+import {
+  fetchMe,
+  signInWithGoogle,
+  signOut,
+  notifyAuthChanged,
+  makeSignInChallenge,
+  challengePasses,
+  type ClientUser,
+  type SignInChallenge,
+} from "@/lib/auth-client";
 import { apiFetch, rememberGuestScope } from "@/lib/api-client";
 
 interface Props {
@@ -32,6 +41,10 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
+  // Human check shown before sending anyone to Google (Supabase does not
+  // CAPTCHA the OAuth hop, so the bot stop has to live here).
+  const [challenge, setChallenge] = useState<SignInChallenge | null>(null);
+  const [challengeInput, setChallengeInput] = useState("");
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +55,7 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
     setAuthConfigured(me.authConfigured);
     setLoading(false);
     onAuthChange?.(me.user);
+    notifyAuthChanged(me.user);
   }, [onAuthChange]);
 
   useEffect(() => {
@@ -87,6 +101,25 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
     };
   }, [open]);
 
+  const beginSignIn = () => {
+    setChallenge(makeSignInChallenge());
+    setChallengeInput("");
+    setBanner(null);
+  };
+
+  const submitChallenge = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!challenge) return;
+    if (!challengePasses(challenge, challengeInput)) {
+      setChallenge(makeSignInChallenge());
+      setChallengeInput("");
+      setBanner("That did not match — here is a new word.");
+      return;
+    }
+    setChallenge(null);
+    void handleSignIn();
+  };
+
   const handleSignIn = async () => {
     setBusy(true);
     const { error } = await signInWithGoogle("/chat");
@@ -110,7 +143,7 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
       return (
         <button
           type="button"
-          onClick={handleSignIn}
+          onClick={challenge ? undefined : beginSignIn}
           disabled={busy || !authConfigured}
           title={authConfigured ? "Sign in with Google" : "Google sign-in is not configured"}
           className="flex items-center gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[13px] font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-elevated-2)] disabled:opacity-50"
@@ -124,7 +157,7 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
       <div className="px-2 pb-2">
         <button
           type="button"
-          onClick={handleSignIn}
+          onClick={challenge ? undefined : beginSignIn}
           disabled={busy || !authConfigured}
           className="group flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--text-primary)] px-3 py-2.5 text-[13.5px] font-semibold text-[var(--bg-main)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -135,6 +168,36 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
           )}
           Continue with Google
         </button>
+        {challenge && (
+          <form onSubmit={submitChallenge} className="mt-2">
+            <label className="block text-[11.5px] text-[var(--text-secondary)]">
+              Type this word to continue:
+            </label>
+            <div className="mt-1.5 flex items-stretch gap-1.5">
+              <span
+                aria-label="Challenge word"
+                className="select-none rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-2.5 py-1.5 font-mono text-[13px] tracking-[0.16em] text-[var(--text-primary)]"
+              >
+                {challenge.display}
+              </span>
+              <input
+                value={challengeInput}
+                onChange={(e) => setChallengeInput(e.target.value)}
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                className="min-w-0 flex-1 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-main)] px-2 py-1.5 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                placeholder="word"
+              />
+              <button
+                type="submit"
+                className="rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-2.5 text-[12px] font-medium text-[var(--text-primary)] hover:border-[var(--accent)]"
+              >
+                Go
+              </button>
+            </div>
+          </form>
+        )}
         {!authConfigured && (
           <p className="mt-2 px-1 text-[11.5px] leading-relaxed text-[var(--text-muted)]">
             Google sign-in needs <code className="text-[var(--accent)]">GOOGLE_CLIENT_ID</code> +{" "}

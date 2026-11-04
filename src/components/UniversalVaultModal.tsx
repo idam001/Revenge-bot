@@ -10,14 +10,12 @@ import {
   FolderKanban,
   KeyRound,
   Plus,
-  ShieldCheck,
   Sliders,
   Trash2,
   X,
   Zap,
 } from "lucide-react";
 import {
-  CREATOR_NAME,
   KEYLESS_MODELS,
   type ProviderDefinition,
 } from "@/lib/revenge-registry";
@@ -141,20 +139,42 @@ export function UniversalVaultModal({
           customModelId: modelDrafts[p.id] ?? p.customModelId,
         }),
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+        warning?: string;
+        verified?: boolean;
+        latencyMs?: number;
+      };
       if (!res.ok) {
         setProviderFeedback((prev) => ({
           ...prev,
-          [p.id]: { ok: false, msg: data.error || "Save failed" },
+          [p.id]: { ok: false, msg: data.error || "That key could not be saved." },
         }));
       } else {
         setKeyDrafts((prev) => ({ ...prev, [p.id]: "" }));
         await onRefreshProviders();
         setProviderFeedback((prev) => ({
           ...prev,
-          [p.id]: { ok: true, msg: "Saved & unlocked" },
+          [p.id]: {
+            ok: Boolean(data.verified),
+            msg:
+              data.message ||
+              (data.verified
+                ? `Verified in ${data.latencyMs ?? 0}ms`
+                : data.warning || "Saved, but not verified yet."),
+          },
         }));
       }
+    } catch (err) {
+      setProviderFeedback((prev) => ({
+        ...prev,
+        [p.id]: {
+          ok: false,
+          msg: err instanceof Error ? err.message : "Network error — check your connection and try again.",
+        },
+      }));
     } finally {
       setBusyProvider(null);
     }
@@ -276,14 +296,14 @@ export function UniversalVaultModal({
         {/* Claude-Style Clean Modal Header */}
         <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3.5 sm:py-4 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
           <div>
-            <h2 className="font-claude-serif text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2.5">
-              REVENGE GPT Settings & World AI Vault
-              <span className="font-sans text-[11px] px-2.5 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] font-medium">
-                Built by {CREATOR_NAME}
-              </span>
+            <h2 className="font-claude-serif text-[17px] font-semibold text-[var(--text-primary)]">
+              Settings
             </h2>
-            <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-              {KEYLESS_MODELS.length} Free Keyless Models (Text, Code, Video & Image) • Bring Your Key for All {providers.length} Global AI Clouds 🌎
+            <p className="text-[12.5px] text-[var(--text-secondary)] mt-0.5">
+              Models, your own API keys, project rules and memory.{" "}
+              <span className="text-[var(--text-muted)]">
+                {KEYLESS_MODELS.length} free models work without a key.
+              </span>
             </p>
           </div>
 
@@ -302,27 +322,27 @@ export function UniversalVaultModal({
             {
               id: "project",
               icon: FolderKanban,
-              label: "Project Knowledge & Rules",
+              label: "Project rules",
             },
             {
               id: "keyless",
               icon: Zap,
-              label: `${KEYLESS_MODELS.length} Free Keyless Models`,
+              label: "Free models",
             },
             {
               id: "vault",
               icon: KeyRound,
-              label: `World AI Keys (${configuredCount}/${providers.length})`,
+              label: configuredCount > 0 ? `API keys · ${configuredCount} connected` : "API keys",
             },
             {
               id: "engine",
               icon: Sliders,
-              label: "Thinking & Output Controls",
+              label: "Response controls",
             },
             {
               id: "memory",
               icon: Brain,
-              label: `Memory (${memories.length})`,
+              label: memories.length ? `Memory · ${memories.length}` : "Memory",
             },
           ].map((t) => {
             const Icon = t.icon;
@@ -521,14 +541,16 @@ export function UniversalVaultModal({
           {/* 13 WORLD CLOUD BYOK VAULT TAB */}
           {activeTab === "vault" && (
             <>
-              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 flex items-start gap-3">
-                <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3.5 flex items-start gap-3">
+                <KeyRound className="w-[18px] h-[18px] text-[var(--text-secondary)] shrink-0 mt-0.5" />
                 <div>
-                  <div className="text-sm font-semibold text-[var(--text-primary)]">
-                    Bring Your Own Key (Optional) — Access Every Frontier AI in the World 🌎
+                  <div className="text-[13.5px] font-medium text-[var(--text-primary)]">
+                    Your own API keys
                   </div>
-                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                    REVENGE GPT already includes {KEYLESS_MODELS.length} free keyless engines. Paste keys below anytime to connect directly to Anthropic Claude, OpenAI, Gemini, DeepSeek, Groq, xAI Grok, OpenRouter (300+ models), Cerebras, or local uncensored Ollama.
+                  <p className="text-[12.5px] leading-relaxed text-[var(--text-secondary)] mt-1">
+                    Optional. Keys are stored on your account only, masked after saving, and never
+                    shown to anyone else. Saving tests the key against the provider first, so if
+                    something is wrong you get the real reason instead of a silent failure.
                   </p>
                 </div>
               </div>
@@ -588,6 +610,13 @@ export function UniversalVaultModal({
                       <p className="text-xs text-[var(--text-secondary)] mb-3 leading-relaxed">
                         {p.description}
                       </p>
+                      {p.id === "gemini" && (
+                        <p className="text-[11px] text-[var(--text-muted)] mb-2 leading-relaxed">
+                          Google AI Studio keys start with <span className="font-mono">AIza…</span> or{" "}
+                          <span className="font-mono">AQ.…</span>. If saving fails, the key is usually
+                          copied short — paste the whole string.
+                        </p>
+                      )}
 
                       {p.configured && p.maskedKey && (
                         <div className="mb-2 text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5 rounded-lg flex items-center justify-between">
@@ -671,18 +700,26 @@ export function UniversalVaultModal({
                             </button>
                           </div>
 
-                          {fb && (
-                            <span
-                              className={`text-[11px] truncate max-w-[190px] ${
-                                fb.ok
-                                  ? "text-emerald-400"
-                                  : "text-[var(--accent)]"
-                              }`}
-                            >
-                              {fb.msg}
-                            </span>
-                          )}
+                          {fb && <span className="sr-only" role="status">{fb.msg}</span>}
                         </div>
+
+                        {fb && (
+                          <div
+                            role="status"
+                            className={`mt-2 flex items-start gap-1.5 text-[11.5px] leading-relaxed rounded-lg px-2.5 py-1.5 ${
+                              fb.ok
+                                ? "text-emerald-300 bg-emerald-500/10 border border-emerald-500/20"
+                                : "text-[var(--text-primary)] bg-[var(--accent-soft)] border border-[var(--accent)]/30"
+                            }`}
+                          >
+                            {fb.ok ? (
+                              <Check className="w-3.5 h-3.5 mt-px shrink-0" />
+                            ) : (
+                              <X className="w-3.5 h-3.5 mt-px shrink-0" />
+                            )}
+                            <span>{fb.msg}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
