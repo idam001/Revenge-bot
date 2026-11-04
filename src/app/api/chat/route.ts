@@ -12,7 +12,7 @@ import {
   type SavedProviderConfig,
 } from "@/lib/revenge-engine";
 import { gatherWebGrounding } from "@/lib/web-grounding";
-import { getOwner } from "@/lib/auth";
+import { getOwner, requireUser } from "@/lib/auth";
 import { clientKey, rateLimitShared } from "@/lib/rate-limit";
 import { and, asc, eq } from "drizzle-orm";
 
@@ -68,10 +68,16 @@ export async function POST(req: Request) {
   try {
     await ensureDbSchema();
 
+    // SIGN-IN GATE: the studio is account-only. A verified Supabase session is
+    // required before any inference runs — anonymous callers are refused here,
+    // not just hidden behind the client-side gate.
+    const gate = await requireUser(req);
+    if (gate.response) return gate.response;
+
     // Identity is resolved server-side; the client cannot claim another owner.
-    const owner = await getOwner({ create: true, request: req });
-    if (!owner) {
-      return Response.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
+    const owner = await getOwner({ create: false, request: req });
+    if (!owner || owner.kind !== "user") {
+      return Response.json({ error: "Sign in with Google to continue.", code: "SIGN_IN_REQUIRED" }, { status: 401 });
     }
     const rl = await rateLimitShared(`chat:${owner.key}:${clientKey(req)}`, 40, 60_000);
     if (!rl.ok) {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { conversations, messages } from "@/db/schema";
-import { getOwner } from "@/lib/auth";
+import { getOwner, requireUser } from "@/lib/auth";
 import { badId, isUuid, serverError } from "@/lib/api-response";
 import { asc, eq, gte, and } from "drizzle-orm";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 /** Load a conversation only if the caller owns it. Returns null otherwise. */
 async function ownedConversation(id: string, req?: Request) {
-  const owner = await getOwner({ request: req });
+  const owner = await getOwner({ create: false, request: req });
   if (!owner) return { owner: null, conv: null as null | typeof conversations.$inferSelect };
   const [conv] = await db
     .select()
@@ -24,6 +24,8 @@ export async function GET(
 ) {
   try {
     await ensureDbSchema();
+    const gate = await requireUser(req);
+    if (gate.response) return gate.response;
     const { id } = await context.params;
     if (!isUuid(id)) return badId();
 
@@ -54,6 +56,8 @@ export async function PATCH(
 ) {
   try {
     await ensureDbSchema();
+    const gate = await requireUser(req);
+    if (gate.response) return gate.response;
     const { id } = await context.params;
     if (!isUuid(id)) return badId();
     const { conv: existing } = await ownedConversation(id, req);
@@ -99,6 +103,8 @@ export async function POST(
 ) {
   try {
     await ensureDbSchema();
+    const gate = await requireUser(req);
+    if (gate.response) return gate.response;
     const { id } = await context.params;
     if (!isUuid(id)) return badId();
     const { owner, conv: owned } = await ownedConversation(id, req);
@@ -212,6 +218,8 @@ export async function DELETE(
 ) {
   try {
     await ensureDbSchema();
+    const gate = await requireUser(req);
+    if (gate.response) return gate.response;
     const { id } = await context.params;
     if (!isUuid(id)) return badId();
     const { owner, conv } = await ownedConversation(id, req);

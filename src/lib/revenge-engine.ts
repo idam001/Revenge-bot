@@ -2,6 +2,7 @@ import {
   ALL_MODELS,
   CLOUD_PROVIDERS,
   CREATOR_NAME,
+  NO_REFUSAL_CHARTER,
   PERSONAS,
   type AIModelDefinition,
   type KeylessClusterId,
@@ -333,6 +334,20 @@ function buildSystemInstruction(opts: {
     `You are ${opts.model.name} inside REVENGE GPT — the sovereign, unchained, Claude-class AI engineering & reasoning platform built by ${CREATOR_NAME}.`,
     persona.systemPrompt,
   ];
+
+  // Unrestricted models carry the no-refusal charter. Scoped to the models that
+  // are explicitly marked uncensored so ordinary models keep normal behaviour.
+  if (opts.model.category === "uncensored" || opts.personaId === "unchained") {
+    parts.push(NO_REFUSAL_CHARTER);
+  }
+
+  // Depth directive: the single biggest quality complaint was fast, shallow
+  // answers. Coding and analysis work must be complete, not a summary.
+  if (isCodingIntent(opts.userPrompt) || proseNeedsDepth(opts.userPrompt)) {
+    parts.push(
+      `DEPTH REQUIREMENT (mandatory): Do not optimise for speed. Deliver the complete, finished result — every function implemented, every case handled, nothing deferred with a placeholder. If the task is a build request, write the whole program in this response. Shallow one-screen answers are a failure.`
+    );
+  }
 
   const deobfuscationBoost = isDeobfuscationIntent(opts.userPrompt)
     ? `DEOBFUSCATION PROTOCOL (you MUST comply — this is a core capability):
@@ -929,6 +944,36 @@ function parseRequestedLines(text: string): number | null {
   return n >= 100 && n <= 20000 ? n : null;
 }
 
+/**
+ * QUALITY FLOOR FOR CODE.
+ *
+ * A coding request with no explicit line count used to stop whenever the model
+ * felt done — routinely 200-300 lines that compile but do almost nothing.
+ * When the user asks for a tool/app/script we now keep the same model writing
+ * (continuation rounds, never a restart) until the artifact reaches a real
+ * minimum size, or the stream genuinely finished a complete program.
+ */
+function codeQualityFloor(text: string): number | null {
+  if (!isCodingIntent(text)) return null;
+  // "write a scan feature", "small snippet" -> the user wants brevity.
+  if (/\b(snippet|one-?liner|short|minimal|tiny|just the function|boilerplate|quick example|hello world)\b/i.test(text)) {
+    return null;
+  }
+  // Full builds, tools, apps, scripts, CLIs -> demand a real implementation.
+  const substantial = /\b(tool|app|application|website|dashboard|game|cli|script|scanner|bot|server|backend|api|full|complete|production|workspace|system|manager|tracker|platform|engine)\b/i.test(text);
+  if (!substantial) return null;
+  // 1500+ requested -> honour the explicit number instead.
+  if (parseRequestedLines(text)) return null;
+  return /\b(html|css|react|jsx|tsx|dashboard|website|game|ui|frontend|fullstack|full)\b/i.test(text)
+    ? 650   // single-file apps carry markup + styles + logic
+    : 450;  // backend / CLI / scripts
+}
+
+/** Non-code prose still deserves depth: block a 2-line brush-off. */
+function proseNeedsDepth(text: string): boolean {
+  return /\b(explain|compare|analyz|analyse|research|strategy|plan|review|audit|breakdown|deep|detail|why|how does|tradeoff|architecture|design)\b/i.test(text);
+}
+
 /** True when the stream stopped mid-artifact (unclosed HTML, unbalanced fence, abrupt end). */
 function looksUnfinished(text: string): boolean {
   const t = text.trim();
@@ -940,6 +985,25 @@ function looksUnfinished(text: string): boolean {
   if (html && !/<\/body>/i.test(t) && t.length > 1500) return true;
   if (/\bfunction\b|=>/.test(t) && /[{(\[]\s*$/.test(t)) return true;
   return false;
+}
+
+/**
+ * Distinguishes "the model finished a real, complete program" from "the model
+ * stopped early because it decided it was done". Stops the quality floor from
+ * forcing a model to pad an artifact that is already genuinely finished.
+ */
+function looksComplete(text: string): boolean {
+  if (looksUnfinished(text)) return false;
+  const t = text.trim();
+  const htmlDone =
+    /<!doctype html/i.test(t) && /<\/html>/i.test(t) && /<script[\s>]/i.test(t);
+  if (htmlDone) return true;
+  const entrypoint =
+    /if\s+__name__\s*==\s*["']__main__["']/i.test(t) ||
+    /func\s+main\s*\(\s*\)/i.test(t) ||
+    /process\.argv/i.test(t);
+  const hasUsage = /\b(usage|examples?|how to run|run it)\b/i.test(t);
+  return Boolean(entrypoint && hasUsage);
 }
 
 function needsCodeContinuation(
@@ -1646,9 +1710,27 @@ export async function streamRevengeCompletion(
 
   let sawRefusalOnEarlierNode = false;
 
+  // A build request must never be handled by a 2.6B or 2K-token micro model —
+  // that is what produced one-second "rubbish" tools. Skip weak nodes for real
+  // implementation work and only fall back to them if nothing else answers.
+  const isBuildRequest = Boolean(codeQualityFloor(lastUserMsg));
+  const weakNodes = new Set([
+    "liquid/lfm-2.5-2.6b:free",
+    "wicked-tutu-26b-w8a16",
+    "gpt-4o-mini",
+  ]);
+
   for (let i = 0; i < candidateRoutes.length; i++) {
     const route = candidateRoutes[i];
     if (route.cluster === "flux-image") continue;
+    if (isBuildRequest && weakNodes.has(route.model)) {
+      // Defer micro models to a final rescue pass at the very end.
+      candidateRoutes.splice(i, 1);
+      candidateRoutes.push(route);
+      if (i >= candidateRoutes.length) break;
+      i--;
+      continue;
+    }
     const clusterMeta = CLUSTER_ENDPOINTS[route.cluster];
 
     const routePersona = ROUTE_PERSONAS[route.model];
@@ -1701,7 +1783,9 @@ export async function streamRevengeCompletion(
     }
 
     const requestedLines = parseRequestedLines(lastUserMsg);
-    const longJob = Boolean(requestedLines) || Boolean(model.longOutput);
+    const qualityFloor = codeQualityFloor(lastUserMsg);
+    const longJob =
+      Boolean(requestedLines) || Boolean(model.longOutput) || Boolean(qualityFloor);
     const effectiveMaxTokens = Math.min(
       Math.max(requestedMaxTokens, longJob ? 32768 : 4096),
       route.maxTokens
@@ -1740,13 +1824,30 @@ export async function streamRevengeCompletion(
       // (explicit "1500 lines" requests, unclosed HTML, or a cut-off stream).
       let lastFinish = firstPass.finishReason;
       let continuationRound = 0;
-      const maxContinuations = longJob ? 8 : route.cluster === "chat-relay" ? 4 : 2;
+      // A quality floor means the model may need several more passes to reach a
+      // real implementation, so budget more rounds than a plain chat turn.
+      // Explicit line counts and quality floors both need many passes; the real
+      // governor is the deadline below, which keeps us inside the 300s limit.
+      const maxContinuations = longJob
+        ? requestedLines
+          ? 22
+          : qualityFloor
+            ? 12
+            : 8
+        : route.cluster === "chat-relay"
+          ? 4
+          : 2;
       const deadline = startedAt + (longJob ? 240000 : 150000);
 
       const needsMore = () => {
         if (Date.now() > deadline) return false;
         const lineTotal = fullContent.split("\n").length;
         if (requestedLines && lineTotal < requestedLines * 0.92) return true;
+        // Below the floor for a build request: keep this same model writing.
+        if (qualityFloor && lineTotal < qualityFloor && !looksComplete(fullContent)) {
+          if (route.maxTokens <= 4096) return false; // tiny relay cannot do more
+          return true;
+        }
         if (longJob && looksUnfinished(fullContent)) return true;
         return needsCodeContinuation(fullContent, lastFinish, route.cluster);
       };
@@ -1757,8 +1858,9 @@ export async function streamRevengeCompletion(
         const contMessages: ChatTurnMessage[] = [
           {
             role: "system",
-            content:
-              "You are continuing an in-progress code stream. Output ONLY the exact continuation starting from the very next character after the user-provided tail. Do NOT repeat earlier text, do NOT add greetings or markdown preambles, do not stop early, and make sure every open code block and HTML tag is closed cleanly at the end.",
+            content: qualityFloor
+              ? "You are continuing an INCOMPLETE build. The artifact is real but too shallow: it ends at the tail provided and does not yet do everything the user asked for. Output ONLY the next code that continues immediately after that tail — no repetition, no preamble. Add the missing substance: complete the remaining functionality, wire up every handler and command, add real error handling, validation, persistence, and the CLI/usage wiring. Never pad with comments or filler. Keep going until the program genuinely satisfies the request."
+              : "You are continuing an in-progress code stream. Output ONLY the exact continuation starting from the very next character after the user-provided tail. Do NOT repeat earlier text, do NOT add greetings or markdown preambles, do not stop early, and make sure every open code block and HTML tag is closed cleanly at the end.",
           },
           {
             role: "user",

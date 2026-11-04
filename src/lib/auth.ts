@@ -63,6 +63,28 @@ export async function getGuestToken(): Promise<string> {
  * Resolve the caller. In a Route Handler you may pass { create: true } to mint
  * a guest cookie when none exists yet.
  */
+/**
+ * Signed-in user for gated surfaces.
+ *
+ * The whole app is behind Google sign-in, so an anonymous guest scope is no
+ * longer created for the studio or its APIs. Requests without a verified
+ * session are rejected here rather than being silently downgraded to a guest,
+ * which also closes the "just call the API directly" bypass.
+ */
+export async function requireUser(_req?: Request) {
+  const user = await getSessionUser();
+  if (!user) {
+    return {
+      user: null as null,
+      response: Response.json(
+        { error: "Sign in with Google to continue.", code: "SIGN_IN_REQUIRED" },
+        { status: 401 }
+      ),
+    };
+  }
+  return { user, response: null as null };
+}
+
 export async function getOwner(
   opts: { create?: boolean; request?: Request } = {}
 ): Promise<Owner | null> {

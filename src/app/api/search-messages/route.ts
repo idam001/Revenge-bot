@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { conversations, messages } from "@/db/schema";
-import { getOwner } from "@/lib/auth";
+import { getOwner, requireUser } from "@/lib/auth";
 import { serverError } from "@/lib/api-response";
 import { and, desc, ilike, eq } from "drizzle-orm";
 
@@ -10,7 +10,9 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true, request: req });
+    const gate = await requireUser(req);
+    if (gate.response) return gate.response;
+    const owner = await getOwner({ create: false, request: req });
     if (!owner) return NextResponse.json({ chats: [], hits: [] });
     const q = (new URL(req.url).searchParams.get("q") || "").trim();
     if (q.length < 2) {

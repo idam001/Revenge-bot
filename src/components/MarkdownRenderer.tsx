@@ -481,8 +481,8 @@ export function MarkdownRenderer({
 }: MarkdownRendererProps) {
   return (
     <div
-      className={`rg-prose max-w-none text-[15px] leading-[1.72] text-[var(--text-primary)] break-words ${
-        serifProse ? "font-claude-serif" : ""
+      className={`max-w-none text-[15px] leading-[1.72] text-[var(--text-primary)] break-words ${
+        serifProse ? "font-claude-serif text-[15.5px]" : ""
       }`}
     >
       <ReactMarkdown

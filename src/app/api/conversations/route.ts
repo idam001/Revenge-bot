@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { conversations } from "@/db/schema";
-import { getOwner } from "@/lib/auth";
+import { getOwner, requireUser } from "@/lib/auth";
 import { clientKey, rateLimitShared } from "@/lib/rate-limit";
 import { serverError } from "@/lib/api-response";
 import { and, desc, eq, or } from "drizzle-orm";
@@ -18,7 +18,9 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true, request: req });
+    const gate = await requireUser(req);
+    if (gate.response) return gate.response;
+    const owner = await getOwner({ create: false, request: req });
     if (!owner) {
       return NextResponse.json({ conversations: [], scoped: false });
     }
@@ -52,7 +54,9 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true, request: req });
+    const gate = await requireUser(req);
+    if (gate.response) return gate.response;
+    const owner = await getOwner({ create: false, request: req });
     if (!owner) {
       return NextResponse.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
     }
@@ -98,7 +102,9 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ request: req });
+    const gate = await requireUser(req);
+    if (gate.response) return gate.response;
+    const owner = await getOwner({ create: false, request: req });
     if (!owner) {
       return NextResponse.json({ ok: true, deleted: 0 });
     }

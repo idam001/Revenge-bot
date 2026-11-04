@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { db, ensureDbSchema } from "@/db";
 import { conversations, messages } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
-import { getOwner } from "@/lib/auth";
+import { getOwner, requireUser } from "@/lib/auth";
 import { serverError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +15,9 @@ export async function POST(req: Request) {
     if (!body.conversationId) {
       return NextResponse.json({ error: "conversationId required" }, { status: 400 });
     }
-    const owner = await getOwner({ request: req });
+    const gate = await requireUser(req);
+    if (gate.response) return gate.response;
+    const owner = await getOwner({ create: false, request: req });
     if (!owner) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
