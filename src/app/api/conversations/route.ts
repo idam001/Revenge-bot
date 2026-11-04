@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { conversations } from "@/db/schema";
 import { getOwner } from "@/lib/auth";
-import { clientKey, rateLimit } from "@/lib/rate-limit";
+import { clientKey, rateLimitShared } from "@/lib/rate-limit";
 import { serverError } from "@/lib/api-response";
 import { and, desc, eq, or } from "drizzle-orm";
 
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ conversations: [], scoped: false });
     }
 
-    const rl = rateLimit(`convs:get:${owner.key}:${clientKey(req)}`, 240, 60_000);
+    const rl = await rateLimitShared(`convs:get:${owner.key}:${clientKey(req)}`, 240, 60_000);
     if (!rl.ok) {
       return NextResponse.json(
         { error: "Too many requests", code: "RATE_LIMITED" },
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
     }
 
-    const rl = rateLimit(`convs:post:${owner.key}`, 60, 60_000);
+    const rl = await rateLimitShared(`convs:post:${owner.key}:${clientKey(req)}`, 60, 60_000);
     if (!rl.ok) {
       return NextResponse.json(
         { error: "Too many new chats. Give it a second.", code: "RATE_LIMITED" },

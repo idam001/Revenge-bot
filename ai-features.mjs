@@ -164,19 +164,23 @@ if (firstConvId) {
   rec("assistant reply persisted with provider metadata", msgs.length >= 2 && hasProvider ? "ok" : "fail", `${msgs.length} messages`);
 }
 
-/* 12. rate limiting on chat */
+/* 12. rate limiting on chat — a dedicated scope so earlier traffic in this
+   run cannot pre-burn the budget. */
 {
+  const RL_GUEST = Math.random().toString(16).slice(2).padEnd(48, "f");
   let limited = false;
-  for (let i = 0; i < 45; i++) {
+  let sawBusy = false;
+  for (let i = 0; i < 48; i++) {
     const res = await fetch(`${BASE}/api/chat`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-revenge-guest": GUEST, origin: BASE },
-      body: JSON.stringify({ message: "hi" }),
+      headers: { "content-type": "application/json", "x-revenge-guest": RL_GUEST, origin: BASE },
+      body: JSON.stringify({ message: "hi", skipSaveUserMessage: true }),
     });
     if (res.status === 429) { limited = true; break; }
+    if (res.status === 503) sawBusy = true;
     await res.body?.cancel();
   }
-  rec("chat rate limit (40/min)", limited ? "ok" : "fail");
+  rec("chat rate limit (40/min, shared across instances)", limited ? "ok" : "fail", sawBusy ? "some 503 busy" : "");
 }
 
 const pass = rows.filter((r) => r.ok === "ok").length;

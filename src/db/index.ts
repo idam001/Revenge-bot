@@ -13,15 +13,34 @@ const globalForDb = globalThis as typeof globalThis & {
   __revengeSchemaReady?: Promise<void>;
 };
 
+/**
+ * Supabase's pooler is "session mode" (port 5432) and caps the whole project
+ * at a small number of clients. On Vercel each warm Lambda gets its own module
+ * instance, so an unbounded pg Pool multiplies fast and the project starts
+ * rejecting connections with EMAXCONNSESSION.
+ *
+ * Keep each instance to a small pool, recycle idle clients quickly, and fail
+ * fast instead of queueing forever. Anything bigger belongs in transaction
+ * mode (port 6543) — see DEPLOYMENT.md.
+ */
 export const pool =
   globalForDb.__arenaNextJsPostgresqlPool ??
   new Pool({
     connectionString: databaseUrl,
+    max: Number(process.env.PG_POOL_MAX ?? 4),
+    idleTimeoutMillis: 5_000,
+    connectionTimeoutMillis: 10_000,
+    allowExitOnIdle: true,
+    keepAlive: true,
   });
 
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.__arenaNextJsPostgresqlPool = pool;
-}
+pool.on("error", (err) => {
+  // An idle client dropped by the pooler must not crash the Lambda.
+  console.error("[db] idle client error:", err.message);
+});
+
+// Always reuse the pool across HMR reloads and repeated invocations.
+globalForDb.__arenaNextJsPostgresqlPool = pool;
 
 export const db = drizzle(pool, { schema });
 

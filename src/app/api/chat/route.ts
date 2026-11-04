@@ -13,7 +13,7 @@ import {
 } from "@/lib/revenge-engine";
 import { gatherWebGrounding } from "@/lib/web-grounding";
 import { getOwner } from "@/lib/auth";
-import { clientKey, rateLimit } from "@/lib/rate-limit";
+import { clientKey, rateLimitShared } from "@/lib/rate-limit";
 import { and, asc, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
     if (!owner) {
       return Response.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
     }
-    const rl = rateLimit(`chat:${owner.key}:${clientKey(req)}`, 40, 60_000);
+    const rl = await rateLimitShared(`chat:${owner.key}:${clientKey(req)}`, 40, 60_000);
     if (!rl.ok) {
       return Response.json(
         { error: "Rate limit reached — wait a moment and try again.", code: "RATE_LIMITED" },
@@ -440,7 +440,19 @@ export async function POST(req: Request) {
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Chat API error";
-    return Response.json({ error: message }, { status: 500 });
+    const raw = err instanceof Error ? err.message : String(err);
+    console.error("[chat] " + raw);
+    // Never echo SQL / ORM internals back to the client.
+    const degraded = /EMAXCONNSESSION|max clients|ECONNREFUSED|timed out|timeout|connection|pool/i.test(raw);
+    return Response.json(
+      {
+        error: degraded
+          ? "The service is briefly over capacity. Please retry in a moment."
+          : "Chat API error",
+        code: degraded ? "BUSY" : "ERROR",
+        retryable: true,
+      },
+      { status: 503, headers: { "Retry-After": "2" } }
+    );
   }
 }
