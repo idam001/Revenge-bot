@@ -146,6 +146,20 @@ export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type AgentSessionRow = typeof agentSessions.$inferSelect;
 export type AgentExecutionRow = typeof agentExecutions.$inferSelect;
 
+/** One chat turn inside an agent session (user prompt or assistant reply). */
+export const agentMessages = pgTable("agent_messages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerKey: text("ownerKey").notNull().default("legacy:public"),
+  sessionId: uuid("sessionId")
+    .notNull()
+    .references(() => agentSessions.id, { onDelete: "cascade" }),
+  role: text("role").notNull(), // "user" | "assistant"
+  content: text("content").notNull().default(""),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AgentMessageRow = typeof agentMessages.$inferSelect;
+
 /** Guest→account merge ledger. One row per successful merge attempt. */
 export const guestMerges = pgTable("guest_merges", {
   id: uuid("id").defaultRandom().primaryKey(),

@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { db, ensureDbSchema } from "@/db";
 import { getOwner, requireUser } from "@/lib/auth";
-import { agentExecutions, agentSessions, memories, providerKeys } from "@/db/schema";
+import { isUuid } from "@/lib/api-response";
+import { agentExecutions, agentMessages, agentSessions, memories, providerKeys } from "@/db/schema";
 import { asc, desc, eq } from "drizzle-orm";
 import {
   connectSandbox,
@@ -80,8 +81,25 @@ export async function GET(req: Request) {
       .from(agentExecutions)
       .where(eq(agentExecutions.sessionId, sessionId))
       .orderBy(asc(agentExecutions.seq));
+    let messages: Array<{ id: string; role: string; content: string; createdAt: string }> = [];
+    try {
+      const rows = await db
+        .select()
+        .from(agentMessages)
+        .where(eq(agentMessages.sessionId, sessionId))
+        .orderBy(asc(agentMessages.createdAt));
+      messages = rows.map((r) => ({
+        id: r.id,
+        role: r.role,
+        content: r.content,
+        createdAt:
+          r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt ?? ""),
+      }));
+    } catch {
+      // Pre-migration sessions simply have no message history yet.
+    }
     const { ownerToken: _o, sandboxId: _s, ...publicSession } = session;
-    return NextResponse.json({ session: publicSession, executions });
+    return NextResponse.json({ session: publicSession, executions, messages });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Agent status failed";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -173,6 +191,143 @@ export async function POST(req: Request) {
 
     const task = (body.task ?? "").trim();
     if (!task) return NextResponse.json({ error: "Task is required" }, { status: 400 });
+
+    // CONTINUE AN EXISTING SESSION
+    // A follow-up message in the same agent chat reuses the session, its sandbox
+    // and its conversation history, so Agent Mode behaves like a normal chat.
+    const continueId = typeof body.sessionId === "string" ? body.sessionId : "";
+    if (continueId && isUuid(continueId)) {
+      const existing = await loadSession(continueId, body.token || undefined, req);
+      if (!existing || existing === "forbidden") {
+        return NextResponse.json({ error: "Session not found" }, { status: 404 });
+      }
+      const priorRows = await db
+        .select()
+        .from(agentMessages)
+        .where(eq(agentMessages.sessionId, continueId))
+        .orderBy(asc(agentMessages.createdAt));
+      const priorHistory = priorRows.map((r) => ({
+        role: r.role === "assistant" ? ("assistant" as const) : ("user" as const),
+        content: r.content,
+      }));
+
+      await db.insert(agentMessages).values({
+        ownerKey: existing.ownerKey,
+        sessionId: continueId,
+        role: "user",
+        content: task,
+      });
+      await db
+        .update(agentSessions)
+        .set({ status: "running", updatedAt: new Date() })
+        .where(eq(agentSessions.id, continueId));
+
+      const [keyRows2] = await Promise.all([
+        db.select().from(providerKeys).where(eq(providerKeys.ownerKey, existing.ownerKey)),
+      ]);
+      const savedKeysMap2: Record<string, SavedProviderConfig> = {};
+      for (const row of keyRows2) {
+        savedKeysMap2[row.providerId] = {
+          providerId: row.providerId,
+          apiKey: row.apiKey,
+          baseUrl: row.baseUrl,
+          customModelId: row.customModelId,
+          enabled: row.enabled,
+        };
+      }
+
+      const stream2 = new ReadableStream({
+        async start(controller) {
+          const send2 = (payload: AgentEvent) => {
+            try {
+              controller.enqueue(sseEncode(payload));
+            } catch {
+              /* client gone */
+            }
+          };
+          const flag2: CancelState = { cancelled: false };
+          cancelFlags.set(continueId, flag2);
+          send2({
+            type: "agent.started",
+            sessionId: continueId,
+            timestamp: new Date().toISOString(),
+            token: existing.ownerToken,
+            continued: true,
+          });
+
+          try {
+            let sb;
+            try {
+              sb = existing.sandboxId
+                ? await connectSandbox(existing.sandboxId)
+                : await createAgentSandbox({ metadata: { session: continueId } });
+            } catch {
+              sb = await createAgentSandbox({ metadata: { session: continueId } });
+            }
+            await db
+              .update(agentSessions)
+              .set({ sandboxId: sb.sandboxId, updatedAt: new Date() })
+              .where(eq(agentSessions.id, continueId));
+
+            let seq2 = 0;
+            const outcome2 = await runAgentLoop(sb, {
+              sessionId: continueId,
+              task,
+              history: priorHistory,
+              modelId: existing.modelId,
+              mode: existing.mode === "plan" ? "plan" : "auto",
+              temperature: typeof body.temperature === "number" ? body.temperature : 0.4,
+              savedKeysMap: savedKeysMap2,
+              shouldCancel: () => flag2.cancelled,
+              emit: (e) => send2(e),
+              onToolRecord: async (record) => {
+                await db.insert(agentExecutions).values({
+                  ownerKey: existing.ownerKey,
+                  sessionId: continueId,
+                  seq: seq2++,
+                  ...record,
+                });
+              },
+            });
+
+            await db.insert(agentMessages).values({
+              ownerKey: existing.ownerKey,
+              sessionId: continueId,
+              role: "assistant",
+              content: outcome2.summary ?? "",
+            });
+            await db
+              .update(agentSessions)
+              .set({
+                status: outcome2.status,
+                summary: outcome2.summary,
+                toolCallCount: existing.toolCallCount + outcome2.toolCallCount,
+                updatedAt: new Date(),
+              })
+              .where(eq(agentSessions.id, continueId));
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Agent run failed";
+            send2({ type: "agent.failed", sessionId: continueId, timestamp: new Date().toISOString(), error: msg });
+          } finally {
+            cancelFlags.delete(continueId);
+            try {
+              controller.close();
+            } catch {
+              /* already closed */
+            }
+          }
+        },
+      });
+
+      return new Response(stream2, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
     if (!isSandboxConfigured()) {
       return NextResponse.json(
         {
@@ -219,6 +374,18 @@ export async function POST(req: Request) {
         customModelId: row.customModelId,
         enabled: row.enabled,
       };
+    }
+
+    // Record the opening prompt so a reload replays the same conversation.
+    try {
+      await db.insert(agentMessages).values({
+        ownerKey: owner.key,
+        sessionId: session.id,
+        role: "user",
+        content: task,
+      });
+    } catch {
+      // History is a nicety; never block the run on it.
     }
 
     const stream = new ReadableStream({
@@ -298,6 +465,18 @@ export async function POST(req: Request) {
             .update(agentSessions)
             .set({ status: outcome.status, summary: outcome.summary.slice(0, 8000), updatedAt: new Date() })
             .where(eq(agentSessions.id, session.id));
+          if (outcome.summary) {
+            try {
+              await db.insert(agentMessages).values({
+                ownerKey: owner.key,
+                sessionId: session.id,
+                role: "assistant",
+                content: outcome.summary.slice(0, 12000),
+              });
+            } catch {
+              // Ignore history write failures.
+            }
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Agent run failed";
           send({ type: "agent.failed", sessionId: session.id, timestamp: new Date().toISOString(), error: msg });

@@ -1,5 +1,10 @@
 import type { AgentSandboxHandle } from "./sandbox-provider";
-import { ALL_MODELS, CLOUD_PROVIDERS, getModelById } from "./revenge-registry";
+import {
+  ALL_MODELS,
+  CLOUD_PROVIDERS,
+  getModelById,
+  type KeylessClusterId,
+} from "./revenge-registry";
 import {
   executeAgentTool,
   getAnthropicTools,
@@ -14,6 +19,8 @@ export type { SavedProviderConfig } from "./revenge-engine";
 export type AgentEventType =
   | "agent.started"
   | "agent.thinking"
+  | "agent.status"
+  | "agent.message"
   | "tool.queued"
   | "tool.started"
   | "tool.stdout"
@@ -38,6 +45,8 @@ export interface AgentEvent {
 export interface AgentRunOptions {
   sessionId: string;
   task: string;
+  /** Earlier turns in this agent session, oldest first. */
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
   modelId: string;
   mode: "auto" | "plan";
   temperature?: number;
@@ -48,7 +57,7 @@ export interface AgentRunOptions {
   savedKeysMap: Record<string, SavedProviderConfig>;
   shouldCancel: () => boolean;
   emit: (event: AgentEvent) => void;
-  onToolRecord: (record: {
+  onToolRecord?: (record: {
     toolName: string;
     command: string | null;
     args: Record<string, unknown>;
@@ -68,6 +77,8 @@ export interface AgentOutcome {
 }
 
 interface ResolvedEndpoint {
+  /** Set when this engine returned a quota/rate error during the run. */
+  failed?: boolean;
   kind: "openai" | "anthropic";
   url: string;
   model: string;
@@ -144,6 +155,89 @@ export function resolveAgentEndpoint(
   const upstream = route?.model ?? "reflection/beam-free";
   const url = KEYLESS_ENDPOINTS[cluster] ?? KEYLESS_ENDPOINTS.kilo;
   return { kind: "openai", url, model: upstream, nativeTools: false };
+}
+
+/**
+ * Every endpoint the agent may use for a model, most-preferred first.
+ *
+ * A single endpoint can run out of quota (HTTP 429 "insufficient_quota"), get
+ * rate limited, or go down. The agent loop walks this list instead of giving up,
+ * which is what used to turn a full quota on one free tier into a dead agent.
+ */
+export function agentEndpointCandidates(
+  modelId: string,
+  savedKeysMap: Record<string, SavedProviderConfig>
+): ResolvedEndpoint[] {
+  const out: ResolvedEndpoint[] = [];
+  const push = (ep: ResolvedEndpoint) => {
+    const key = `${ep.url}|${ep.model}`;
+    if (!out.some((e) => `${e.url}|${e.model}` === key)) out.push(ep);
+  };
+
+  const model = ALL_MODELS.find((m) => m.id === modelId) ?? getModelById("revenge-omega-x");
+
+  // A provider the user configured themselves always comes first.
+  if (model.requiresKey) {
+    try {
+      push(resolveAgentEndpoint(modelId, savedKeysMap));
+    } catch {
+      /* fall through to the keyless mesh */
+    }
+  }
+
+  // The selected model's own routes.
+  for (const route of model.keylessRoutes ?? []) {
+    if (route.cluster === "flux-image" || route.cluster === "aihorde") continue;
+    const url = KEYLESS_ENDPOINTS[route.cluster];
+    if (!url) continue;
+    push({ kind: "openai", url, model: route.model, nativeTools: false });
+  }
+
+  // The shared keyless mesh, so a depleted tier can never stop the agent.
+  const mesh: Array<[KeylessClusterId, string]> = [
+    ["kilo", "reflection/beam-free"],
+    ["kilo", "dots-studio/dots-3-note-preview:free"],
+    ["ovh", "Mistral-Small-3.2-24B-Instruct-2506"],
+    ["llm7", "codestral-latest"],
+    ["ovh", "Qwen3.6-27B"],
+    ["pollinations", "openai"],
+    ["chat-relay", "gpt-4o-mini"],
+  ];
+  for (const [cluster, model_] of mesh) {
+    const url = KEYLESS_ENDPOINTS[cluster];
+    if (!url) continue;
+    push({ kind: "openai", url, model: model_, nativeTools: false });
+  }
+
+  return out;
+}
+
+/** Errors that mean "this endpoint is exhausted", not "this request is wrong". */
+/**
+ * Keyless endpoints occasionally emit their raw chat template
+ * (<|end|><|start|>user<|message|> …, [INST], </s>) instead of clean prose.
+ * Cut the text at the first control token and trim the leftovers so the user
+ * only ever sees the model's actual answer.
+ */
+export function sanitizeModelText(input: string): string {
+  if (!input) return "";
+  let out = input;
+  const cut = out.search(/<\|?(?:end|start|im_start|im_end|eot_id|endoftext|assistant|user|system)\|?>/i);
+  if (cut >= 0) out = out.slice(0, cut);
+  out = out.replace(/<\|[^|>]{0,40}\|>/g, "");
+  out = out.replace(/\[\/?INST\]/gi, "").replace(/<\/?s>/g, "");
+  out = out.replace(/^(?:assistant|ai)\s*:\s*/i, "");
+  return out.trim();
+}
+
+export function isQuotaOrRateError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+  return (
+    /(^|\b)(429|503|502|504)(\b|$)/.test(msg) ||
+    /insufficient_quota|quota exceeded|daily token quota|rate limit|too many requests|capacity|overloaded|temporarily unavailable|deadline exceeded|timeout|timed out|econnreset|fetch failed/.test(
+      msg
+    )
+  );
 }
 
 export function agentCapability(modelId: string): "native-tools" | "structured-actions" | "chat-only" {
@@ -421,13 +515,34 @@ export async function runAgentLoop(
   opts: AgentRunOptions
 ): Promise<AgentOutcome> {
   const started = Date.now();
-  const emit = (type: AgentEvent["type"], extra: Record<string, unknown> = {}) =>
-    opts.emit({ type, sessionId: opts.sessionId, timestamp: new Date().toISOString(), ...extra });
+  const emit = (type: AgentEvent["type"], extra: Record<string, unknown> = {}) => {
+    const clean: Record<string, unknown> = { ...extra };
+    if (typeof clean.text === "string") clean.text = sanitizeModelText(clean.text);
+    if (typeof clean.summary === "string") clean.summary = sanitizeModelText(clean.summary);
+    opts.emit({ type, sessionId: opts.sessionId, timestamp: new Date().toISOString(), ...clean });
+  };
 
   const maxIterations = opts.maxIterations ?? 18;
   const maxToolCalls = opts.maxToolCalls ?? 30;
   const temperature = opts.temperature ?? 0.4;
-  const endpoint = resolveAgentEndpoint(opts.modelId, opts.savedKeysMap);
+  const candidates = agentEndpointCandidates(opts.modelId, opts.savedKeysMap);
+  if (candidates.length === 0) {
+    emit("agent.failed", { error: "No language model endpoint is available for this model." });
+    return { status: "failed", summary: "No endpoint available", toolCallCount: 0, iterations: 0 };
+  }
+  // Index into the candidate list; advances when an endpoint is exhausted.
+  let endpoint = candidates[0];
+  const noteFailover = (reason: string) => {
+    const next = candidates.find((c) => !c.failed);
+    if (!next) return false;
+    endpoint = next;
+    emit("agent.status", {
+      text: `Switching model engine after: ${reason.slice(0, 120)}`,
+      providerUsed: next.url,
+    });
+    return true;
+  };
+  for (const c of candidates) c.failed = false;
   const systemPrompt = buildAgentSystemPrompt(opts.customSystemPrompt);
 
   emit("agent.started", {
@@ -435,6 +550,10 @@ export async function runAgentLoop(
     modelId: opts.modelId,
     capability: endpoint.nativeTools ? "native-tools" : "structured-actions",
   });
+
+  // Latest prose from the model in this turn. On stop or failure we return this
+  // instead of a bare "Cancelled", so nothing the user already read is lost.
+  let turnProse = "";
 
   // Plan mode: single answer, no tools.
   if (opts.mode === "plan") {
@@ -464,7 +583,10 @@ export async function runAgentLoop(
         maxTokens: 2048,
         stream: true,
         extraHeaders: endpoint.extraHeaders,
-        onText: (t) => emit("agent.thinking", { text: t }),
+        onText: (t) => {
+          turnProse = (turnProse + t).slice(-4000);
+          emit("agent.thinking", { text: t });
+        },
       });
       emit("agent.completed", { summary: r.text, toolCallCount: 0, iterations: 1 });
       return { status: "completed", summary: r.text, toolCallCount: 0, iterations: 1 };
@@ -481,14 +603,22 @@ export async function runAgentLoop(
   const seenSignatures = new Map<string, number>();
   let toolCallCount = 0;
   let iteration = 0;
+  let failedOvers = 0;
   let finalSummary = "";
+  let lastProse = "";
+  let sameTextRepeats = 0;
 
   const checkCancel = (): boolean => opts.shouldCancel();
 
   while (iteration < maxIterations) {
     if (checkCancel()) {
       emit("agent.failed", { error: "Cancelled by user.", cancelled: true });
-      return { status: "cancelled", summary: finalSummary || "Cancelled by user.", toolCallCount, iterations: iteration };
+      return {
+        status: "cancelled",
+        summary: (finalSummary || turnProse || "Stopped by user before the agent wrote a summary. Partial work is saved in the sandbox.").trim(),
+        toolCallCount,
+        iterations: iteration,
+      };
     }
     if (toolCallCount >= maxToolCalls) {
       finalSummary = `Stopped: reached the tool-call limit (${maxToolCalls}). Partial work is saved in the workspace.`;
@@ -501,7 +631,10 @@ export async function runAgentLoop(
       if (endpoint.kind === "anthropic") {
         const convo: Array<{ role: string; content: unknown }> =
           iteration === 1
-            ? [{ role: "user", content: opts.task }]
+            ? [
+                ...(opts.history ?? []).map((m) => ({ role: m.role, content: m.content })),
+                { role: "user", content: opts.task },
+              ]
             : anthropicHistory;
         const r = await anthropicChat({
           apiKey: endpoint.apiKey!,
@@ -511,7 +644,10 @@ export async function runAgentLoop(
           temperature,
           maxTokens: 4096,
         });
-        if (r.text) emit("agent.thinking", { text: r.text });
+        if (r.text) {
+          turnProse = r.text.slice(-4000);
+          emit("agent.thinking", { text: r.text });
+        }
         if (r.toolCalls.length === 0) {
           finalSummary = r.text;
           emit("agent.completed", { summary: finalSummary, toolCallCount, iterations: iteration });
@@ -543,6 +679,7 @@ export async function runAgentLoop(
         iteration === 1
           ? [
               { role: "system", content: systemPrompt },
+              ...(opts.history ?? []).map((m) => ({ role: m.role, content: m.content })),
               { role: "user", content: opts.task },
             ]
           : history;
@@ -601,13 +738,37 @@ export async function runAgentLoop(
           });
           continue;
         }
-        // The model answered in prose instead of acting. That is almost never
+        // If the model keeps restating the same text, the turn is drifting.
+      if (r.text.trim() && lastProse && r.text.trim() === lastProse) {
+        sameTextRepeats += 1;
+      } else if (r.text.trim()) {
+        sameTextRepeats = 0;
+      }
+      if (r.text.trim()) lastProse = r.text.trim();
+      if (sameTextRepeats >= 2) {
+        finalSummary = r.text.trim();
+        emit("agent.completed", {
+          summary: finalSummary,
+          toolCallCount,
+          iterations: iteration,
+          limitHit: true,
+        });
+        return { status: "completed", summary: finalSummary, toolCallCount, iterations: iteration };
+      }
+
+      // The model answered in prose instead of acting. That is almost never
         // the end of the work — it usually means it lost the fence format. Keep
         // the loop alive by restating the contract instead of stopping early.
-        const looksDone =
-          /\b(done|finished|complete|all set|everything is (working|ready))\b/i.test(r.text) &&
-          /\b(below|result|output|summary)\b/i.test(r.text);
-        if (!looksDone && history.length > 0) {
+        const text = r.text.trim();
+        const isPreamble =
+          /(let me|i will|i'll|i am going to|i'm going to|now i|next,? i|first,? i|starting|sure[,!]|okay[,!]|getting started|i need to|i should)\s*$/i.test(
+            text
+          ) ||
+          /(let me|i will|i'll|i am going to|i'm going to)\b[^.]{0,80}$/i.test(text);
+        const saysDone =
+          /\b(done|finished|complete|completed|all set|everything is (working|ready)|successfully)\b/i.test(text) &&
+          !isPreamble;
+        if (!saysDone && history.length > 0) {
           history.push({ role: "assistant", content: r.text });
           history.push({
             role: "user",
@@ -646,7 +807,23 @@ export async function runAgentLoop(
       history.push({ role: "user", content: resultTexts.join("\n\n") });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Agent iteration failed";
-      // Provider hiccup: surface and stop rather than fabricate.
+      // Quota/rate failures are expected on free tiers. Retire this engine and
+      // continue the SAME task on the next one instead of failing the run.
+      (endpoint as { failed?: boolean }).failed = true;
+      if (isQuotaOrRateError(err) && noteFailover(msg)) {
+        failedOvers = (failedOvers ?? 0) + 1;
+        if (failedOvers > candidates.length + 2) {
+          emit("agent.failed", {
+            error:
+              "Every free model engine is busy right now. Pick another model, or add your own key in Models & keys.",
+            toolCallCount,
+            iterations: iteration,
+          });
+          return { status: "failed", summary: "All engines exhausted", toolCallCount, iterations: iteration };
+        }
+        iteration--; // this attempt did not count against the budget
+        continue;
+      }
       emit("agent.failed", { error: msg, toolCallCount, iterations: iteration });
       return { status: "failed", summary: msg, toolCallCount, iterations: iteration };
     }
@@ -698,7 +875,7 @@ async function runOneTool(
     });
   }
 
-  await opts.onToolRecord({
+  await opts.onToolRecord?.({
     toolName,
     command,
     args,

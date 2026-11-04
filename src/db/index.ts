@@ -191,6 +191,17 @@ export async function ensureDbSchema(): Promise<void> {
           "createdAt" timestamp NOT NULL DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS "guest_merges_user_idx" ON "guest_merges" ("userId");
+
+        -- Agent conversation turns (so Agent Mode behaves like a real chat)
+        CREATE TABLE IF NOT EXISTS "agent_messages" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          "ownerKey" text NOT NULL DEFAULT 'legacy:public',
+          "sessionId" uuid NOT NULL REFERENCES "agent_sessions" ("id") ON DELETE CASCADE,
+          "role" text NOT NULL,
+          "content" text NOT NULL DEFAULT '',
+          "createdAt" timestamp NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS "agent_messages_session_idx" ON "agent_messages" ("sessionId", "createdAt");
       `);
     })().catch((err) => {
       globalForDb.__revengeSchemaReady = undefined;

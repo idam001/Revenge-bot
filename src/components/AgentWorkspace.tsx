@@ -19,6 +19,7 @@ import {
   Plus,
   RefreshCw,
   Square,
+  Copy,
   Trash2,
   X,
 } from "lucide-react";
@@ -141,6 +142,19 @@ export function AgentWorkspace({
   const [status, setStatus] = useState<string>("idle");
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [summary, setSummary] = useState<string>("");
+  // Visible conversation: every prompt you send and every answer the agent gives.
+  // Tool activity for the current turn is nested under the assistant turn, so the
+  // transcript reads like a normal chat instead of a bare event log.
+  const [turns, setTurns] = useState<
+    Array<{
+      id: string;
+      role: "user" | "assistant";
+      text: string;
+      status: "streaming" | "done" | "failed";
+      events: FeedEntry[];
+      startedAt: string;
+    }>
+  >([]);
 
   const [modelId, setModelId] = useState(initialModelId || "revenge-omega-x");
   const [mode, setMode] = useState<"auto" | "plan">("auto");
@@ -227,11 +241,34 @@ export function AgentWorkspace({
     });
   }, []);
 
+  const pushToTurn = useCallback((entry: FeedEntry) => {
+    setTurns((prev) => {
+      if (prev.length === 0) return prev;
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last.role !== "assistant") return prev;
+      next[next.length - 1] = { ...last, events: [...last.events, entry] };
+      return next;
+    });
+  }, []);
+
   const handleEvent = useCallback(
     (evt: Record<string, unknown>) => {
       const type = String(evt.type ?? "");
       if (type === "agent.thinking" && typeof evt.text === "string") {
         pushThinking(evt.text);
+        setTurns((prev) => {
+          if (prev.length === 0) return prev;
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last.role !== "assistant") return prev;
+          next[next.length - 1] = {
+            ...last,
+            text: (last.text + evt.text).slice(-20000),
+            status: "streaming",
+          };
+          return next;
+        });
       } else if (type === "tool.queued" || type === "tool.started") {
         upsertTool(String(evt.executionId ?? ""), {
           tool: String(evt.tool ?? "execute_command"),
@@ -261,10 +298,36 @@ export function AgentWorkspace({
         upsertTool(String(evt.executionId ?? ""), {
           stdout: `Background process started (pid ${String(evt.pid ?? "?")}).`,
         } as Partial<FeedTool>);
+      } else if (type === "agent.status") {
+        const txt = String(evt.text ?? "");
+        if (txt) {
+          const entry: FeedEntry = {
+            id: `st_${Date.now()}`,
+            kind: "status",
+            text: txt,
+            timestamp: String(evt.timestamp ?? new Date().toISOString()),
+          };
+          setFeed((prev) => [...prev, entry]);
+          pushToTurn(entry);
+        }
       } else if (type === "agent.completed" || type === "agent.failed") {
         const cancelled = Boolean((evt as { cancelled?: boolean }).cancelled);
         setStatus(type === "agent.completed" ? (cancelled ? "cancelled" : "completed") : "failed");
         const text = String((evt as { summary?: unknown }).summary ?? (evt as { error?: unknown }).error ?? "");
+        setTurns((prev) => {
+          const next = [...prev];
+          for (let i = next.length - 1; i >= 0; i--) {
+            if (next[i].role === "assistant") {
+              next[i] = {
+                ...next[i],
+                status: type === "agent.completed" ? "done" : "failed",
+                text: text || next[i].text,
+              };
+              break;
+            }
+          }
+          return next;
+        });
         if (text) {
           setSummary(text);
           setFeed((prev) => [
@@ -289,14 +352,30 @@ export function AgentWorkspace({
     async (taskText: string) => {
       const task = taskText.trim();
       if (!task || running) return;
-      setInput("");
+
+      // Follow-up if we already own a session; brand new run otherwise.
+      const continuing = Boolean(sessionId && token);
+
+      const now = new Date().toISOString();
+      const userTurnId = `u_${Date.now()}`;
+      const assistantTurnId = `a_${Date.now()}`;
+
+      // Optimistic: your message appears the instant you hit send.
+      setTurns((prev) => [
+        ...prev,
+        { id: userTurnId, role: "user", text: task, status: "done", events: [], startedAt: now },
+        { id: assistantTurnId, role: "assistant", text: "", status: "streaming", events: [], startedAt: now },
+      ]);
       setFeed([]);
-      setSummary("");
+      setInput("");
       setStatus("running");
       setRunning(true);
-      setSessionId(null);
-      setToken(null);
-      setTaskTitle(task.length > 60 ? `${task.slice(0, 60)}…` : task);
+      if (!continuing) {
+        setSummary("");
+        setSessionId(null);
+        setToken(null);
+        setTaskTitle(task.length > 60 ? `${task.slice(0, 60)}…` : task);
+      }
 
       const ctrl = new AbortController();
       readerAbort.current = ctrl;
@@ -305,7 +384,11 @@ export function AgentWorkspace({
         const res = await apiFetch("/api/agent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "start", task, title: task.slice(0, 80), modelId, mode }),
+          body: JSON.stringify(
+            continuing
+              ? { action: "start", sessionId, token, task, modelId, mode }
+              : { action: "start", task, title: task.slice(0, 80), modelId, mode }
+          ),
           signal: ctrl.signal,
         });
         if (!res.ok || !res.body) {
@@ -345,17 +428,37 @@ export function AgentWorkspace({
         if ((err as Error)?.name !== "AbortError") {
           const msg = err instanceof Error ? err.message : "Agent run failed";
           setStatus("failed");
-          setFeed((prev) => [
-            ...prev,
-            { id: `err_${Date.now()}`, kind: "status", text: msg, timestamp: new Date().toISOString() },
-          ]);
+          const entry: FeedEntry = {
+            id: `err_${Date.now()}`,
+            kind: "status",
+            text: msg,
+            timestamp: new Date().toISOString(),
+          };
+          setFeed((prev) => [...prev, entry]);
+          setTurns((prev) => {
+            const next = [...prev];
+            for (let i = next.length - 1; i >= 0; i--) {
+              if (next[i].role === "assistant") {
+                next[i] = { ...next[i], status: "failed", text: msg };
+                break;
+              }
+            }
+            return next;
+          });
         }
       } finally {
         setRunning(false);
+        setTurns((prev) =>
+          prev.map((t) =>
+            t.id === assistantTurnId && t.status === "streaming"
+              ? { ...t, status: "done", text: t.text || summary || "Finished." }
+              : t
+          )
+        );
         void refreshSessions();
       }
     },
-    [running, modelId, mode, handleEvent, refreshSessions]
+    [running, modelId, mode, handleEvent, refreshSessions, sessionId, token, summary]
   );
 
   const stopTask = useCallback(async () => {
@@ -399,6 +502,7 @@ export function AgentWorkspace({
           status: string;
           startedAt: string;
         }>;
+        messages?: Array<{ id: string; role: string; content: string; createdAt: string }>;
       };
       if (!data.session) return;
       setSessionId(data.session.id);
@@ -407,6 +511,38 @@ export function AgentWorkspace({
       setStatus(data.session.status);
       setModelId(data.session.modelId);
       setSummary(data.session.summary ?? "");
+      const rebuilt: Array<{
+        id: string;
+        role: "user" | "assistant";
+        text: string;
+        status: "streaming" | "done" | "failed";
+        events: FeedEntry[];
+        startedAt: string;
+      }> = (data.messages ?? [])
+        .filter((m) => m.content && m.content.trim())
+        .map((m) => ({
+          id: m.id,
+          role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
+          text: m.content,
+          status: (m.role === "assistant" && data.session?.status === "failed" ? "failed" : "done") as
+            | "streaming"
+            | "done"
+            | "failed",
+          events: [],
+          startedAt: m.createdAt,
+        }));
+      // Older sessions predate message history — fall back to the last summary.
+      if (rebuilt.length === 0 && data.session.summary) {
+        rebuilt.push({
+          id: `legacy_${data.session.id}`,
+          role: "assistant",
+          text: data.session.summary,
+          status: data.session.status === "failed" ? "failed" : "done",
+          events: [],
+          startedAt: new Date().toISOString(),
+        });
+      }
+      setTurns(rebuilt);
       setFeed(
         (data.executions ?? []).map((e) => ({
           id: e.id,
@@ -596,9 +732,9 @@ export function AgentWorkspace({
           </div>
         )}
 
-        {/* Activity feed */}
-        <div ref={feedRef} className="flex-1 overflow-y-auto px-3 sm:px-5 py-4">
-          {feed.length === 0 ? (
+        {/* Conversation transcript: your messages and the agent's replies, in order */}
+        <div ref={feedRef} className="flex-1 overflow-y-auto px-3 sm:px-5 py-4" aria-live="polite" aria-atomic="false">
+          {turns.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center px-6 py-10">
               <span className="w-12 h-12 rounded-2xl bg-[#d97757]/12 border border-[#d97757]/25 flex items-center justify-center">
                 <Bot className="w-6 h-6 text-[#d97757]" />
@@ -606,7 +742,8 @@ export function AgentWorkspace({
               <h2 className="mt-4 font-claude-serif text-[22px] text-white">What should I build?</h2>
               <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-white/50">
                 Describe the app, script or fix. I will plan it, write real files in an isolated cloud sandbox,
-                run commands, read the actual errors, debug, test and deliver a ZIP.
+                run commands, read the actual errors, debug, test and deliver a ZIP. Keep talking afterwards —
+                this stays the same session, so you can iterate like a normal chat.
               </p>
               <div className="mt-5 flex flex-wrap justify-center gap-2">
                 {[
@@ -626,94 +763,137 @@ export function AgentWorkspace({
               </div>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto space-y-0.5">
-              {feed.map((entry) => {
-                if (entry.kind === "thinking") {
-                  return (
-                    <div key={entry.id} className="py-1.5 text-[13px] leading-relaxed text-white/55 whitespace-pre-wrap break-words">
-                      {entry.text}
+            <div className="max-w-3xl mx-auto space-y-5 pb-2">
+              {turns.map((turn) =>
+                turn.role === "user" ? (
+                  <div key={turn.id} className="flex justify-end">
+                    <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[#2f2d2a] border border-white/10 px-3.5 py-2.5 text-[14.5px] leading-relaxed text-white/95 whitespace-pre-wrap break-words">
+                      {turn.text}
+                      <div className="mt-1 text-right text-[10px] font-mono text-white/25">{fmtTime(turn.startedAt)}</div>
                     </div>
-                  );
-                }
-                if (entry.kind === "summary") {
-                  return (
-                    <div
-                      key={entry.id}
-                      className={`mt-3 rounded-xl border px-4 py-3 text-[13.5px] leading-relaxed whitespace-pre-wrap ${
-                        entry.status === "failed"
-                          ? "border-red-400/30 bg-red-400/[0.06] text-red-100/90"
-                          : "border-emerald-400/25 bg-emerald-400/[0.06] text-emerald-50/90"
-                      }`}
-                    >
-                      {entry.text}
-                    </div>
-                  );
-                }
-                if (entry.kind === "status") {
-                  return (
-                    <div key={entry.id} className="py-1.5 text-[12.5px] text-white/40 italic">
-                      {entry.text}
-                    </div>
-                  );
-                }
-                const t = entry as FeedTool;
-                const ok = t.status === "success";
-                const runningRow = t.status === "running";
-                return (
-                  <div key={t.id} className="rounded-lg hover:bg-white/[0.03] transition">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setFeed((prev) => prev.map((e) => (e.id === t.id && e.kind === "tool" ? { ...e, expanded: !e.expanded } : e)))
-                      }
-                      className="w-full flex items-center gap-2.5 px-2 py-[7px] text-left cursor-pointer"
-                    >
-                      <ChevronRight
-                        className={`w-3.5 h-3.5 text-white/30 transition-transform ${t.expanded ? "rotate-90" : ""}`}
-                      />
-                      <span className="text-[13.5px] text-white/80">
-                        Used {toolLabel(t.tool)}
-                      </span>
-                      {runningRow ? (
-                        <Loader2 className="w-3.5 h-3.5 text-white/50 animate-spin" />
-                      ) : ok ? (
-                        <Check className="w-4 h-4 text-emerald-400" strokeWidth={3} />
-                      ) : (
-                        <X className="w-4 h-4 text-red-400" strokeWidth={3} />
+                  </div>
+                ) : (
+                  <div key={turn.id} className="flex gap-2.5">
+                    <span className="mt-0.5 shrink-0 w-6 h-6 rounded-md bg-[#d97757]/15 border border-[#d97757]/25 flex items-center justify-center">
+                      <Bot className="w-3.5 h-3.5 text-[#d97757]" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {/* Tool step ledger: collapsed by default, one line per action */}
+                      {turn.events.length > 0 && (
+                        <div className="mb-2 space-y-0.5">
+                          {turn.events.map((entry) => {
+                            if (entry.kind === "status") {
+                              return (
+                                <div key={entry.id} className="py-0.5 text-[12px] text-[#d97757]/80 italic">
+                                  {entry.text}
+                                </div>
+                              );
+                            }
+                            const t = entry as FeedTool;
+                            const ok = t.status === "success";
+                            const runningRow = t.status === "running";
+                            return (
+                              <div key={t.id} className="rounded-lg hover:bg-white/[0.03] transition">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setFeed((prev) =>
+                                      prev.map((e) =>
+                                        e.id === t.id && e.kind === "tool" ? { ...e, expanded: !e.expanded } : e
+                                      )
+                                    )
+                                  }
+                                  className="w-full flex items-center gap-2 px-1.5 py-[5px] text-left cursor-pointer"
+                                >
+                                  <ChevronRight
+                                    className={`w-3 h-3 text-white/30 transition-transform ${t.expanded ? "rotate-90" : ""}`}
+                                  />
+                                  <span className="text-[12.5px] text-white/70">Used {toolLabel(t.tool)}</span>
+                                  {runningRow ? (
+                                    <Loader2 className="w-3 h-3 text-white/50 animate-spin" />
+                                  ) : ok ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-400" strokeWidth={3} />
+                                  ) : (
+                                    <X className="w-3.5 h-3.5 text-red-400" strokeWidth={3} />
+                                  )}
+                                  <span
+                                    className={`text-[11px] font-mono ${runningRow ? "text-white/35" : ok ? "text-white/35" : "text-red-400/90"}`}
+                                  >
+                                    {!ok && typeof t.exitCode === "number" ? `exit ${t.exitCode} ` : ""}
+                                    {t.durationMs !== undefined ? fmtDuration(t.durationMs) : runningRow ? "running…" : ""}
+                                  </span>
+                                </button>
+                                {(t.command || t.stdout || t.stderr) && (
+                                  <div className={`overflow-hidden transition-all duration-200 ${t.expanded ? "max-h-[480px]" : "max-h-0"}`}>
+                                    <div className="ml-6 mr-1 mb-1.5 rounded-lg bg-black/40 border border-white/[0.06] overflow-hidden">
+                                      {t.command && (
+                                        <div className="px-3 pt-2 pb-1 font-mono text-[11px] text-white/45 break-all">
+                                          <span className="text-[#d97757]">$ </span>
+                                          {t.command}
+                                        </div>
+                                      )}
+                                      {t.stdout && (
+                                        <pre className="px-3 py-1.5 font-mono text-[11.5px] leading-relaxed text-emerald-100/80 whitespace-pre-wrap break-words max-h-56 overflow-y-auto">
+                                          {t.stdout}
+                                        </pre>
+                                      )}
+                                      {t.stderr && (
+                                        <pre className="px-3 py-1.5 font-mono text-[11.5px] leading-relaxed text-red-300/85 whitespace-pre-wrap break-words max-h-40 overflow-y-auto border-t border-white/[0.06]">
+                                          {t.stderr}
+                                        </pre>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
-                      <span className={`text-[12px] font-mono ${runningRow ? "text-white/40" : ok ? "text-white/40" : "text-red-400/90"}`}>
-                        {!ok && typeof t.exitCode === "number" ? `exit ${t.exitCode} ` : ""}
-                        {t.durationMs !== undefined ? fmtDuration(t.durationMs) : runningRow ? "running…" : ""}
-                      </span>
-                      <span className="ml-auto text-[10.5px] font-mono text-white/25 hidden sm:block">
-                        {fmtTime(t.timestamp)}
-                      </span>
-                    </button>
-                    {(t.command || t.stdout || t.stderr) && (
-                      <div className={`overflow-hidden transition-all duration-200 ${t.expanded ? "max-h-[480px]" : "max-h-0"}`}>
-                        <div className="ml-7 mr-2 mb-2 rounded-lg bg-black/40 border border-white/[0.06] overflow-hidden">
-                          {t.command && (
-                            <div className="px-3 pt-2 pb-1 font-mono text-[11.5px] text-white/45 break-all">
-                              <span className="text-[#d97757]">$ </span>
-                              {t.command}
-                            </div>
-                          )}
-                          {t.stdout && (
-                            <pre className="px-3 py-1.5 font-mono text-[12px] leading-relaxed text-emerald-100/80 whitespace-pre-wrap break-words max-h-56 overflow-y-auto">
-                              {t.stdout}
-                            </pre>
-                          )}
-                          {t.stderr && (
-                            <pre className="px-3 py-1.5 font-mono text-[12px] leading-relaxed text-red-300/85 whitespace-pre-wrap break-words max-h-40 overflow-y-auto border-t border-white/[0.06]">
-                              {t.stderr}
-                            </pre>
+
+                      {/* The agent's answer, as plain prose */}
+                      {turn.text ? (
+                        <div
+                          className={`text-[14.5px] leading-[1.75] whitespace-pre-wrap break-words ${
+                            turn.status === "failed" ? "text-red-200/90" : "text-white/90"
+                          }`}
+                        >
+                          {turn.text}
+                          {turn.status === "streaming" && (
+                            <span className="inline-block w-[2px] h-[15px] ml-0.5 align-middle bg-[#d97757] animate-pulse" />
                           )}
                         </div>
-                      </div>
-                    )}
+                      ) : turn.status === "streaming" ? (
+                        <div className="flex items-center gap-2 text-[13px] text-white/45">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Working in the sandbox…
+                        </div>
+                      ) : null}
+
+                      {turn.status !== "streaming" && turn.text && (
+                        <div className="mt-1.5 flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => void navigator.clipboard?.writeText(turn.text)}
+                            className="text-[11px] text-white/30 hover:text-white/70 cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <Copy className="w-3 h-3" /> Copy
+                          </button>
+                          {turn.status === "done" && sessionId && token && (
+                            <button
+                              type="button"
+                              onClick={() => void downloadZip()}
+                              className="text-[11px] text-white/30 hover:text-white/70 cursor-pointer inline-flex items-center gap-1"
+                            >
+                              <Download className="w-3 h-3" /> Download ZIP
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                );
-              })}
+                )
+              )}
             </div>
           )}
         </div>
