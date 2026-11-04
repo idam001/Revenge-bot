@@ -532,9 +532,19 @@ export async function runAgentLoop(
   }
   // Index into the candidate list; advances when an endpoint is exhausted.
   let endpoint = candidates[0];
+  let fullCycles = 0;
   const noteFailover = (reason: string) => {
-    const next = candidates.find((c) => !c.failed);
-    if (!next) return false;
+    let next = candidates.find((c) => !c.failed && c !== endpoint);
+    if (!next) next = candidates.find((c) => !c.failed);
+    if (!next) {
+      // Every engine in the mesh has been retired. Free tiers recover within
+      // seconds, so make one more sweep before telling the user anything.
+      if (fullCycles >= 1) return false;
+      fullCycles += 1;
+      for (const c of candidates) c.failed = false;
+      next = candidates.find((c) => c !== endpoint) ?? candidates[0];
+      if (!next) return false;
+    }
     endpoint = next;
     emit("agent.status", {
       text: `Switching model engine after: ${reason.slice(0, 120)}`,
@@ -810,22 +820,30 @@ export async function runAgentLoop(
       // Quota/rate failures are expected on free tiers. Retire this engine and
       // continue the SAME task on the next one instead of failing the run.
       (endpoint as { failed?: boolean }).failed = true;
-      if (isQuotaOrRateError(err) && noteFailover(msg)) {
+      if (isQuotaOrRateError(err)) {
         failedOvers = (failedOvers ?? 0) + 1;
-        if (failedOvers > candidates.length + 2) {
-          emit("agent.failed", {
-            error:
-              "Every free model engine is busy right now. Pick another model, or add your own key in Models & keys.",
-            toolCallCount,
-            iterations: iteration,
-          });
-          return { status: "failed", summary: "All engines exhausted", toolCallCount, iterations: iteration };
+        if (failedOvers <= candidates.length * 2 + 4 && noteFailover(msg)) {
+          iteration--; // this attempt did not count against the budget
+          continue;
         }
-        iteration--; // this attempt did not count against the budget
-        continue;
+        // Genuinely out of engines: name the cause AND the fix, and never lose work.
+        const friendly =
+          "All free model engines are out of capacity right now, so I stopped instead of losing your work. " +
+          `Everything built so far is saved in this sandbox. Last engine error: ${msg.slice(0, 180)}. ` +
+          "Two ways forward: send the message again in a moment (free tiers refill quickly), switch the model in the picker, or add your own API key in Models & keys for unlimited runs.";
+        emit("agent.failed", {
+          error: friendly,
+          toolCallCount,
+          iterations: iteration,
+          recoverable: true,
+        });
+        return { status: "failed", summary: friendly, toolCallCount, iterations: iteration };
       }
-      emit("agent.failed", { error: msg, toolCallCount, iterations: iteration });
-      return { status: "failed", summary: msg, toolCallCount, iterations: iteration };
+      // Not a quota problem — still keep whatever the model already produced.
+      const partial = turnProse.trim();
+      const message = partial ? `${msg}\n\nPartial answer before the error:\n${partial.slice(0, 1500)}` : msg;
+      emit("agent.failed", { error: message, toolCallCount, iterations: iteration });
+      return { status: "failed", summary: message, toolCallCount, iterations: iteration };
     }
   }
 

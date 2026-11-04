@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Square,
   Copy,
+  RotateCw,
   Trash2,
   X,
 } from "lucide-react";
@@ -153,6 +154,7 @@ export function AgentWorkspace({
       status: "streaming" | "done" | "failed";
       events: FeedEntry[];
       startedAt: string;
+      prompt?: string;
     }>
   >([]);
 
@@ -364,7 +366,15 @@ export function AgentWorkspace({
       setTurns((prev) => [
         ...prev,
         { id: userTurnId, role: "user", text: task, status: "done", events: [], startedAt: now },
-        { id: assistantTurnId, role: "assistant", text: "", status: "streaming", events: [], startedAt: now },
+        {
+          id: assistantTurnId,
+          role: "assistant",
+          text: "",
+          status: "streaming",
+          events: [],
+          startedAt: now,
+          prompt: task,
+        },
       ]);
       setFeed([]);
       setInput("");
@@ -879,6 +889,15 @@ export function AgentWorkspace({
                           >
                             <Copy className="w-3 h-3" /> Copy
                           </button>
+                          {turn.status === "failed" && (
+                            <button
+                              type="button"
+                              onClick={() => void startTask(turn.prompt || "Continue where you left off.")}
+                              className="text-[11px] text-[#d97757] hover:text-[#e8896b] cursor-pointer inline-flex items-center gap-1 font-medium"
+                            >
+                              <RotateCw className="w-3 h-3" /> Try again
+                            </button>
+                          )}
                           {turn.status === "done" && sessionId && token && (
                             <button
                               type="button"
@@ -911,9 +930,15 @@ export function AgentWorkspace({
                   void startTask(input);
                 }
               }}
-              placeholder={running ? "Agent is working…" : "What would you like to do?"}
-              disabled={running}
-              className="w-full bg-transparent px-4 pt-3.5 text-[15px] text-white placeholder:text-white/30 focus:outline-none resize-none max-h-40 disabled:opacity-60"
+              placeholder={
+                running
+                  ? "Agent is working… press stop to interrupt"
+                  : turns.length > 0
+                    ? "Reply to the agent — it keeps this session and its files"
+                    : "What would you like to do?"
+              }
+              className="w-full bg-transparent px-4 pt-3.5 text-[15px] text-white placeholder:text-white/30 focus:outline-none resize-none max-h-40"
+              style={{ minHeight: "52px" }}
             />
             <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1">
               <input
