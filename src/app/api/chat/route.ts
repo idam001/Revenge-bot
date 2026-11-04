@@ -357,6 +357,10 @@ export async function POST(req: Request) {
           }
 
           const result = await streamRevengeCompletion({
+            // Vercel aborts req.signal when the browser disconnects. Passing it
+            // down means a cancelled or switched-away chat stops generating
+            // immediately instead of holding a Lambda slot for minutes.
+            abortSignal: req.signal,
             modelId,
             personaId,
             messages: historyMessages,

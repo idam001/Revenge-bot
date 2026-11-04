@@ -76,7 +76,8 @@ export async function getChatSandbox(
   const cached = sandboxCache.get(conversationId);
   if (cached && cached.expires > Date.now()) {
     try {
-      if (await cached.sandbox.isRunning()) return { sandbox: cached.sandbox, sessionId: null };
+      // A cached handle is reusable as long as it still reports an id.
+      if (cached.sandbox.sandboxId) return { sandbox: cached.sandbox, sessionId: null };
     } catch {
       sandboxCache.delete(conversationId);
     }

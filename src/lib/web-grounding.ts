@@ -1,4 +1,11 @@
 import type { WebSourceItem } from "@/db/schema";
+import {
+  isResearchQuery,
+  searchArxiv,
+  searchBrave,
+  searchCrossref,
+  searchOpenAlex,
+} from "./research-engines";
 
 /**
  * Two-stage Deep Web Search & Grounding Engine:
@@ -572,6 +579,15 @@ export async function gatherWebGrounding(
     if (wantsGitHub) jobs.push(searchGitHubRepos(query).then(trusted));
     if (wantsHN) jobs.push(searchHackerNews(query).then(trusted));
     if (wantsNpm) jobs.push(searchNpm(query).then(trusted));
+    // Second general-web opinion: Bing RSS silently returns nothing on some
+    // queries, and Brave covers what DuckDuckGo's instant answers miss.
+    jobs.push(searchBrave(query).then(gate));
+    // Research-grade sources when the question is academic.
+    if (isResearchQuery(userQuery)) {
+      jobs.push(searchOpenAlex(query).then(trusted));
+      jobs.push(searchCrossref(query).then(trusted));
+      jobs.push(searchArxiv(query).then(trusted));
+    }
   }
 
   const [urlSources, ...groups] = await Promise.all([urlPromise, ...jobs]);
@@ -589,10 +605,10 @@ export async function gatherWebGrounding(
     if (seen.has(key)) continue;
     seen.add(key);
     searchSources.push(s);
-    if (searchSources.length >= 6) break;
+    if (searchSources.length >= 9) break;
   }
 
-  const sources = [...urlSources, ...searchSources].slice(0, 6);
+  const sources = [...urlSources, ...searchSources].slice(0, 9);
   if (sources.length === 0) {
     return { sources: [], contextBlock: "", searched: shouldSearch };
   }

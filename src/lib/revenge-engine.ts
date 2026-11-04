@@ -156,6 +156,8 @@ export interface EngineRequestOptions {
   enableCodeExecution?: boolean;
   savedKeysMap: Record<string, SavedProviderConfig>;
   onEvent: (event: StreamDeltaEvent) => void;
+  /** Aborted when the browser disconnects, so we stop generating immediately. */
+  abortSignal?: AbortSignal;
 }
 
 class RefusalInterceptedError extends Error {
@@ -1721,6 +1723,8 @@ export async function streamRevengeCompletion(
   ]);
 
   for (let i = 0; i < candidateRoutes.length; i++) {
+    // Never start another upstream attempt for a client that already left.
+    if (opts.abortSignal?.aborted) break;
     const route = candidateRoutes[i];
     if (route.cluster === "flux-image") continue;
     if (isBuildRequest && weakNodes.has(route.model)) {
@@ -1840,6 +1844,8 @@ export async function streamRevengeCompletion(
       const deadline = startedAt + (longJob ? 240000 : 150000);
 
       const needsMore = () => {
+        // The browser went away: stop immediately, do not keep generating.
+        if (opts.abortSignal?.aborted) return false;
         if (Date.now() > deadline) return false;
         const lineTotal = fullContent.split("\n").length;
         if (requestedLines && lineTotal < requestedLines * 0.92) return true;

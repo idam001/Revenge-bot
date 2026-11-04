@@ -1,4 +1,4 @@
-import { Sandbox } from "e2b";
+import type { AgentSandboxHandle } from "./sandbox-provider";
 import { ALL_MODELS, CLOUD_PROVIDERS, getModelById } from "./revenge-registry";
 import {
   executeAgentTool,
@@ -155,7 +155,7 @@ export function agentCapability(modelId: string): "native-tools" | "structured-a
   }
 }
 
-const AGENT_SYSTEM = `You are REVENGE Agent, an autonomous coding agent running inside REVENGE GPT with a real isolated Linux cloud sandbox (E2B). You have genuine tools that execute real commands, manipulate real files, and return real output. Never claim an action succeeded without tool output proving it.
+const AGENT_SYSTEM = `You are REVENGE Agent, an autonomous coding agent running inside REVENGE GPT with a real isolated Linux cloud sandbox (Firecracker microVM). You have genuine tools that execute real commands, manipulate real files, and return real output. Never claim an action succeeded without tool output proving it.
 
 WORKSPACE: All project files live under /home/user/workspace. Stay inside it.
 
@@ -417,7 +417,7 @@ async function anthropicChat(opts: {
 /* ------------------------------------------------------------------ */
 
 export async function runAgentLoop(
-  sandbox: Sandbox,
+  sandbox: AgentSandboxHandle,
   opts: AgentRunOptions
 ): Promise<AgentOutcome> {
   const started = Date.now();
@@ -642,7 +642,7 @@ export async function runAgentLoop(
 }
 
 async function runOneTool(
-  sandbox: Sandbox,
+  sandbox: AgentSandboxHandle,
   opts: AgentRunOptions,
   toolName: string,
   args: Record<string, unknown>,

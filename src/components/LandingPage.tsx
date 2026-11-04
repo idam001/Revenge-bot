@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { createSupabaseBrowserClient, startGoogleSignIn } from "@/lib/supabase-browser";
 import {
   ArrowRight,
   BookOpen,
@@ -194,6 +195,29 @@ export function LandingPage() {
   const [navOpen, setNavOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+  // Every "Open chat" entry point goes straight to Google for a new visitor.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setSignedIn(false);
+      return;
+    }
+    let alive = true;
+    void supabase.auth.getUser().then(({ data }) => {
+      if (alive) setSignedIn(Boolean(data.user));
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const openChat = async (e?: React.MouseEvent) => {
+    if (signedIn) return; // let the <Link> navigate normally
+    e?.preventDefault();
+    await startGoogleSignIn("/chat");
+  };
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -241,6 +265,7 @@ export function LandingPage() {
           <div className="flex items-center gap-2">
             <Link
               href="/chat"
+              onClick={(e) => void openChat(e)}
               className="hidden sm:inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white text-[#0b0b0e] text-[13.5px] font-semibold hover:bg-white/90 transition cursor-pointer"
             >
               Open chat
@@ -286,7 +311,10 @@ export function LandingPage() {
               )}
               <Link
                 href="/chat"
-                onClick={() => setNavOpen(false)}
+                onClick={(e) => {
+                  setNavOpen(false);
+                  void openChat(e);
+                }}
                 className="mt-2 flex items-center justify-center gap-2 h-11 rounded-full bg-white text-[#0b0b0e] text-[14px] font-semibold"
               >
                 Open chat
@@ -336,6 +364,7 @@ export function LandingPage() {
             <div className="mt-9 flex flex-col sm:flex-row items-center justify-center gap-3">
               <Link
                 href="/chat"
+              onClick={(e) => void openChat(e)}
                 className="inline-flex items-center justify-center gap-2 w-full sm:w-auto h-12 px-7 rounded-full bg-white text-[#0b0b0e] text-[14.5px] font-semibold hover:bg-white/90 transition cursor-pointer"
               >
                 Open chat
@@ -613,6 +642,7 @@ export function LandingPage() {
             <div className="mt-9 flex flex-col sm:flex-row items-center justify-center gap-3">
               <Link
                 href="/chat"
+              onClick={(e) => void openChat(e)}
                 className="inline-flex items-center justify-center gap-2 w-full sm:w-auto h-12 px-8 rounded-full bg-white text-[#0b0b0e] text-[14.5px] font-semibold hover:bg-white/90 transition cursor-pointer"
               >
                 Open chat
@@ -682,6 +712,7 @@ export function LandingPage() {
                   <li>
                     <Link
                       href="/chat"
+              onClick={(e) => void openChat(e)}
                       className="text-[14px] text-white/55 hover:text-white transition"
                     >
                       Open chat
@@ -690,6 +721,7 @@ export function LandingPage() {
                   <li>
                     <Link
                       href="/chat"
+              onClick={(e) => void openChat(e)}
                       className="text-[14px] text-white/55 hover:text-white transition"
                     >
                       Workspace

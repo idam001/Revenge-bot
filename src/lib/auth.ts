@@ -183,10 +183,17 @@ export async function getSessionUser() {
   }
 }
 
-/** True when the row belongs to the caller (or is public legacy data). */
+/**
+ * True only when the row belongs to the caller.
+ *
+ * Rows with no owner, or owned by the pre-auth 'legacy:public' scope, are NOT
+ * readable by an ordinary account: a newly created account must start empty and
+ * never inherit somebody else's history.
+ */
 export function canAccess(ownerKey: string | null | undefined, owner: Owner | null): boolean {
-  if (!ownerKey || ownerKey === LEGACY_OWNER_KEY) return true; // pre-auth public data
   if (!owner) return false;
+  if (!ownerKey) return false;
+  if (ownerKey === LEGACY_OWNER_KEY) return owner.kind === "user" && owner.isAdmin;
   return ownerKey === owner.key;
 }
 

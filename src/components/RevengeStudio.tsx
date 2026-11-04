@@ -604,7 +604,12 @@ export function RevengeStudio() {
   };
 
   const handleSelectConversation = async (conv: ConversationRow) => {
-    abortRef.current?.abort();
+    // Switching threads must be instant. Abort the stream and drop the old
+    // partial assistant message instead of letting it finish in the background.
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch { /* already settled */ }
+      abortRef.current = null;
+    }
     setIsGenerating(false);
     setActiveConvId(conv.id);
     setSelectedModelId(conv.modelId || "revenge-omega-x");
@@ -1067,6 +1072,9 @@ export function RevengeStudio() {
     setIsGenerating(true);
     const controller = new AbortController();
     abortRef.current = controller;
+    // Lets the catch block tell a user-initiated cancel apart from a failed
+    // conversation switch, so the abort message only appears when it should.
+    let abortedByNavigate = false;
 
     if (arenaMode && !isAppending) {
       void launchArenaContenderB(finalText, controller.signal);
@@ -1395,6 +1403,12 @@ export function RevengeStudio() {
       applyPending();
       const aborted = (err as Error)?.name === "AbortError";
       const msg = err instanceof Error ? err.message : "Network error";
+      // A conversation switch already replaced the thread; never paint an
+      // error into the newly opened chat.
+      if (aborted) {
+        abortRef.current = null;
+        return;
+      }
       setMessages((prev) =>
         prev.map((m) =>
           m.id === targetId

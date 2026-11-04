@@ -381,7 +381,7 @@ async function toolGetProcessStatus(sandbox: AgentSandbox, args: Record<string, 
     const procs = await sandbox.commands.list();
     const found = procs.find((p) => p.pid === pid);
     if (found) {
-      return shapeResult("get_process_status", startedAt, `RUNNING pid=${pid} cmd=${found.cmd}`, "", 0, { pid, running: true });
+      return shapeResult("get_process_status", startedAt, `RUNNING pid=${pid} cmd=${found.cmd ?? ""}`, "", 0, { pid, running: true });
     }
     return shapeResult("get_process_status", startedAt, `pid=${pid} is no longer running (exited).`, "", 0, { pid, running: false });
   } catch (err) {
@@ -394,8 +394,14 @@ async function toolStopProcess(sandbox: AgentSandbox, args: Record<string, unkno
   const pid = Number(args.pid);
   if (!Number.isInteger(pid) || pid <= 0) throw new Error("stop_process requires an integer 'pid'.");
   try {
+    if (!sandbox.commands.connect) {
+      // Backend has no process table; fall back to a targeted kill.
+      const r = await sandbox.commands.run(`kill -9 ${pid} 2>/dev/null || true`);
+      return shapeResult("stop_process", startedAt, `stop requested for pid=${pid}`, r.stderr, 0, { pid });
+    }
     const handle = await sandbox.commands.connect(pid);
-    const killed = await handle.kill();
+    await handle.kill();
+    const killed = true;
     return shapeResult(
       "stop_process",
       startedAt,

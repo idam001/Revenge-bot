@@ -586,8 +586,8 @@ export function AgentWorkspace({
 
         {e2bReady === false && (
           <div className="shrink-0 mx-3 sm:mx-5 mt-3 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-[12.5px] leading-relaxed text-amber-200">
-            <strong>E2B_API_KEY is not configured.</strong> Agent Mode UI works, but execution is disabled until the key is
-            added server-side (Render → your service → Environment → <code>E2B_API_KEY</code> → restart).
+            <strong>No sandbox backend is configured.</strong> Agent Mode is available but cannot execute code yet.
+            On a Vercel deployment this is automatic; on other hosts, set <code>E2B_API_KEY</code> server-side and restart.
           </div>
         )}
 

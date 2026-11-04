@@ -40,6 +40,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ claimed: 0, reason: "no_guest_scope" });
     }
 
+    // LEGACY GUARD: only rows that belong to this exact guest scope move. The
+    // pre-auth 'legacy:public' rows are never claimable, so a brand-new account
+    // can never inherit history it did not create.
     const guestKey = `guest:${token}`;
     const userKey = `user:${user.id}`;
 

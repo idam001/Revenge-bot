@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { db, ensureDbSchema } from "@/db";
-import { getOwner } from "@/lib/auth";
+import { getOwner, requireUser } from "@/lib/auth";
 import { agentExecutions, agentSessions, memories, providerKeys } from "@/db/schema";
 import { asc, desc, eq } from "drizzle-orm";
 import {
   connectSandbox,
   createAgentSandbox,
-  isE2BConfigured,
+  isSandboxConfigured,
   killSandbox,
 } from "@/lib/e2b-manager";
 import { runAgentLoop, type AgentEvent, type SavedProviderConfig } from "@/lib/agent-loop";
@@ -43,6 +43,13 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const list = url.searchParams.get("list");
     if (list) {
+      // SECURITY: this used to return every session from every account. The
+      // list is now scoped to the signed-in owner, and anonymous callers get
+      // nothing back at all.
+      const gate = await requireUser(req);
+      if (gate.response) return gate.response;
+      const listOwner = await getOwner({ create: false, request: req });
+      if (!listOwner) return NextResponse.json({ sessions: [], sandboxConfigured: isSandboxConfigured() });
       const rows = await db
         .select({
           id: agentSessions.id,
@@ -55,9 +62,10 @@ export async function GET(req: Request) {
           updatedAt: agentSessions.updatedAt,
         })
         .from(agentSessions)
+        .where(eq(agentSessions.ownerKey, listOwner.key))
         .orderBy(desc(agentSessions.updatedAt))
         .limit(30);
-      return NextResponse.json({ sessions: rows, e2bConfigured: isE2BConfigured() });
+      return NextResponse.json({ sessions: rows, sandboxConfigured: isSandboxConfigured() });
     }
 
     const sessionId = url.searchParams.get("sessionId") || "";
@@ -115,8 +123,12 @@ export async function POST(req: Request) {
           await Promise.all(
             procs.map(async (p) => {
               try {
-                const handle = await sandbox.commands.connect(p.pid);
-                await handle.kill();
+                if (sandbox.commands.connect) {
+                  const handle = await sandbox.commands.connect(p.pid);
+                  await handle.kill();
+                } else {
+                  await sandbox.commands.run(`kill -9 ${p.pid} 2>/dev/null || true`);
+                }
               } catch {
                 // Process already gone.
               }
@@ -161,11 +173,11 @@ export async function POST(req: Request) {
 
     const task = (body.task ?? "").trim();
     if (!task) return NextResponse.json({ error: "Task is required" }, { status: 400 });
-    if (!isE2BConfigured()) {
+    if (!isSandboxConfigured()) {
       return NextResponse.json(
         {
           error:
-            "E2B_API_KEY is not configured on the server. Add it in your deployment environment (Render → service → Environment → E2B_API_KEY), restart, and try again.",
+            "Agent execution is not available: no sandbox backend is configured. On Vercel this is automatic; elsewhere set E2B_API_KEY.",
         },
         { status: 503 }
       );
