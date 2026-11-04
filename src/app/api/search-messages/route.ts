@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { conversations, messages } from "@/db/schema";
 import { getOwner } from "@/lib/auth";
+import { serverError } from "@/lib/api-response";
 import { and, desc, ilike, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     if (!owner) return NextResponse.json({ chats: [], hits: [] });
     const q = (new URL(req.url).searchParams.get("q") || "").trim();
     if (q.length < 2) {
@@ -63,7 +64,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ chats, hits });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Search failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Search failed");
   }
 }

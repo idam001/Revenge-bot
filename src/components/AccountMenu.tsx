@@ -18,7 +18,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { fetchMe, signInWithGoogle, signOut, type ClientUser } from "@/lib/auth-client";
-import { rememberGuestScope } from "@/lib/api-client";
+import { apiFetch, rememberGuestScope } from "@/lib/api-client";
 
 interface Props {
   /** "sidebar" shows the wide card, "header" the compact avatar. */
@@ -53,7 +53,7 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
     if (!user) return;
     const key = `revenge-merged:${user.id}`;
     if (localStorage.getItem(key)) return;
-    fetch("/api/auth/me", {
+    apiFetch("/api/auth/me", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "merge-guest" }),

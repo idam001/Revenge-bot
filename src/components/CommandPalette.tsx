@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, FileText, MessageSquare, Search, Zap } from "lucide-react";
+import { apiFetch } from "@/lib/api-client";
 
 export interface PaletteAction {
   id: string;
@@ -60,7 +61,7 @@ export function CommandPalette({ open, onClose, actions, onOpenConversation }: C
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/search-messages?q=${encodeURIComponent(q)}`);
+        const r = await apiFetch(`/api/search-messages?q=${encodeURIComponent(q)}`);
         if (r.ok) {
           const d = (await r.json()) as { chats?: ChatHit[]; hits?: MsgHit[] };
           setChats(d.chats ?? []);

@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { conversations, messages } from "@/db/schema";
 import { getOwner } from "@/lib/auth";
+import { badId, isUuid, serverError } from "@/lib/api-response";
 import { asc, eq, gte, and } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
 /** Load a conversation only if the caller owns it. Returns null otherwise. */
-async function ownedConversation(id: string) {
-  const owner = await getOwner();
+async function ownedConversation(id: string, req?: Request) {
+  const owner = await getOwner({ request: req });
   if (!owner) return { owner: null, conv: null as null | typeof conversations.$inferSelect };
   const [conv] = await db
     .select()
@@ -18,14 +19,15 @@ async function ownedConversation(id: string) {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
     await ensureDbSchema();
     const { id } = await context.params;
+    if (!isUuid(id)) return badId();
 
-    const { conv } = await ownedConversation(id);
+    const { conv } = await ownedConversation(id, req);
     if (!conv) {
       // 404 rather than 403 so ids can't be probed
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
@@ -42,8 +44,7 @@ export async function GET(
       messages: threadMessages,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to load conversation";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Failed to load conversation");
   }
 }
 
@@ -54,7 +55,8 @@ export async function PATCH(
   try {
     await ensureDbSchema();
     const { id } = await context.params;
-    const { conv: existing } = await ownedConversation(id);
+    if (!isUuid(id)) return badId();
+    const { conv: existing } = await ownedConversation(id, req);
     if (!existing) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
@@ -87,8 +89,7 @@ export async function PATCH(
 
     return NextResponse.json({ conversation: updated });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to update conversation";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Failed to update conversation");
   }
 }
 
@@ -99,7 +100,8 @@ export async function POST(
   try {
     await ensureDbSchema();
     const { id } = await context.params;
-    const { owner, conv: owned } = await ownedConversation(id);
+    if (!isUuid(id)) return badId();
+    const { owner, conv: owned } = await ownedConversation(id, req);
     if (!owned || !owner) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
@@ -200,19 +202,19 @@ export async function POST(
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Action failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Action failed");
   }
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
     await ensureDbSchema();
     const { id } = await context.params;
-    const { owner, conv } = await ownedConversation(id);
+    if (!isUuid(id)) return badId();
+    const { owner, conv } = await ownedConversation(id, req);
     if (!conv || !owner) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
@@ -221,7 +223,6 @@ export async function DELETE(
       .where(and(eq(conversations.id, id), eq(conversations.ownerKey, owner.key)));
     return NextResponse.json({ ok: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to delete";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Failed to delete");
   }
 }

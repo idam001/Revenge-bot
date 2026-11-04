@@ -3,6 +3,7 @@ import { db, ensureDbSchema } from "@/db";
 import { conversations } from "@/db/schema";
 import { getOwner } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/rate-limit";
+import { serverError } from "@/lib/api-response";
 import { and, desc, eq, or } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -44,8 +45,7 @@ export async function GET(req: Request) {
       authenticated: owner.kind === "user",
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Database error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Database error");
   }
 }
 
@@ -87,8 +87,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ conversation: created }, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to create conversation";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Failed to create conversation");
   }
 }
 
@@ -96,10 +95,10 @@ export async function POST(req: Request) {
  * DELETE /api/conversations — delete ALL of the caller's conversations.
  * Never a global truncate: signed-in and guest data stay isolated.
  */
-export async function DELETE() {
+export async function DELETE(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner();
+    const owner = await getOwner({ request: req });
     if (!owner) {
       return NextResponse.json({ ok: true, deleted: 0 });
     }
@@ -109,7 +108,6 @@ export async function DELETE() {
       .returning({ id: conversations.id });
     return NextResponse.json({ ok: true, deleted: deleted.length });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to clear conversations";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Failed to clear conversations");
   }
 }

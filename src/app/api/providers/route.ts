@@ -4,6 +4,7 @@ import { providerKeys } from "@/db/schema";
 import { CLOUD_PROVIDERS } from "@/lib/revenge-registry";
 import { and, eq } from "drizzle-orm";
 import { getOwner } from "@/lib/auth";
+import { serverError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 
@@ -34,10 +35,10 @@ function hasServerEnvKey(providerId: string): boolean {
   return (envMap[providerId] ?? []).some((k) => Boolean(process.env[k]?.trim()));
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     const rows = owner
       ? await db.select().from(providerKeys).where(eq(providerKeys.ownerKey, owner.key))
       : [];
@@ -59,15 +60,14 @@ export async function GET() {
 
     return NextResponse.json({ providers });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to load providers";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Failed to load providers");
   }
 }
 
 export async function POST(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     if (!owner) {
       return NextResponse.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
     }
@@ -263,7 +263,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Provider action failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Provider action failed");
   }
 }

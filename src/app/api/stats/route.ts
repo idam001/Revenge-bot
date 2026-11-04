@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { sql } from "drizzle-orm";
 import { getOwner } from "@/lib/auth";
+import { serverError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,6 @@ export async function GET(req: Request) {
       topModels: top.rows ?? [],
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Stats failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Stats failed");
   }
 }

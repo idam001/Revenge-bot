@@ -22,6 +22,7 @@ import {
   type ProviderDefinition,
 } from "@/lib/revenge-registry";
 import type { AppSettingsRow, MemoryRow } from "@/db/schema";
+import { apiFetch } from "@/lib/api-client";
 
 export interface ProviderStatusItem extends ProviderDefinition {
   configured: boolean;
@@ -108,7 +109,7 @@ export function UniversalVaultModal({
     setTestingMesh(true);
     setMeshStatus(null);
     try {
-      const res = await fetch("/api/providers", {
+      const res = await apiFetch("/api/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "testKeyless" }),
@@ -129,7 +130,7 @@ export function UniversalVaultModal({
       [p.id]: { ok: true, msg: "Saving..." },
     }));
     try {
-      const res = await fetch("/api/providers", {
+      const res = await apiFetch("/api/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -163,7 +164,7 @@ export function UniversalVaultModal({
     setBusyProvider(p.id);
     try {
       if (keyDrafts[p.id]?.trim()) {
-        await fetch("/api/providers", {
+        await apiFetch("/api/providers", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -178,7 +179,7 @@ export function UniversalVaultModal({
         await onRefreshProviders();
       }
 
-      const res = await fetch("/api/providers", {
+      const res = await apiFetch("/api/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -209,7 +210,7 @@ export function UniversalVaultModal({
   const handleDeleteProvider = async (providerId: string) => {
     setBusyProvider(providerId);
     try {
-      await fetch("/api/providers", {
+      await apiFetch("/api/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "delete", providerId }),
@@ -229,7 +230,7 @@ export function UniversalVaultModal({
     if (!newMemoryText.trim()) return;
     setAddingMemory(true);
     try {
-      await fetch("/api/settings", {
+      await apiFetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -246,7 +247,7 @@ export function UniversalVaultModal({
   };
 
   const handleToggleMemory = async (id: string) => {
-    await fetch("/api/settings", {
+    await apiFetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "toggleMemory", id }),
@@ -255,7 +256,7 @@ export function UniversalVaultModal({
   };
 
   const handleDeleteMemory = async (id: string) => {
-    await fetch("/api/settings", {
+    await apiFetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "deleteMemory", id }),

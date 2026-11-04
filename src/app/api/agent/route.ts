@@ -25,12 +25,12 @@ function sseEncode(payload: AgentEvent): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-async function loadSession(sessionId: string, token?: string) {
+async function loadSession(sessionId: string, token?: string, req?: Request) {
   const [session] = await db.select().from(agentSessions).where(eq(agentSessions.id, sessionId));
   if (!session) return null;
   // Session capability token must match, AND the request must come from the
   // same owner (account or guest) that created the session.
-  const owner = await getOwner();
+  const owner = await getOwner({ request: req });
   if (!owner) return "forbidden" as const;
   if (session.ownerKey !== owner.key) return "forbidden" as const;
   if (token && session.ownerToken !== token) return "forbidden" as const;
@@ -63,7 +63,7 @@ export async function GET(req: Request) {
     const sessionId = url.searchParams.get("sessionId") || "";
     const token = url.searchParams.get("token") || "";
     if (!sessionId) return NextResponse.json({ error: "sessionId required" }, { status: 400 });
-    const session = await loadSession(sessionId, token || undefined);
+    const session = await loadSession(sessionId, token || undefined, req);
     if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
@@ -101,7 +101,7 @@ export async function POST(req: Request) {
       if (!body.sessionId || !body.token) {
         return NextResponse.json({ error: "sessionId and token required" }, { status: 400 });
       }
-      const session = await loadSession(body.sessionId, body.token);
+      const session = await loadSession(body.sessionId, body.token, req);
       if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
       if (session === "forbidden") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
@@ -137,7 +137,7 @@ export async function POST(req: Request) {
       if (!body.sessionId || !body.token) {
         return NextResponse.json({ error: "sessionId and token required" }, { status: 400 });
       }
-      const session = await loadSession(body.sessionId, body.token);
+      const session = await loadSession(body.sessionId, body.token, req);
       if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
       if (session === "forbidden") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       if (session.sandboxId) {
@@ -171,7 +171,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     if (!owner) {
       return Response.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
     }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { conversations, guestMerges, memories, messages } from "@/db/schema";
 import { GUEST_COOKIE, getOwner, getSessionUser } from "@/lib/auth";
+import { serverError } from "@/lib/api-response";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -135,7 +136,6 @@ export async function POST(req: Request) {
       memoriesMoved: guestMems.length,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Merge failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Merge failed");
   }
 }

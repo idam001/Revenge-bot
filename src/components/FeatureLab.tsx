@@ -23,6 +23,7 @@ import {
   type FeatureDef,
 } from "@/lib/feature-catalog";
 import { getModelById } from "@/lib/revenge-registry";
+import { apiFetch } from "@/lib/api-client";
 
 interface Stats {
   chats: number;
@@ -119,7 +120,7 @@ export function FeatureLab({
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    fetch("/api/stats")
+    apiFetch("/api/stats")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (alive && d && !d.error) setStats(d as Stats);

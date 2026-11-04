@@ -616,7 +616,7 @@ export function RevengeStudio() {
     stickRef.current = true;
 
     try {
-      const res = await fetch(`/api/conversations/${conv.id}`);
+      const res = await apiFetch(`/api/conversations/${conv.id}`);
       if (!res.ok) return;
       const data = (await res.json()) as { messages?: UIMessage[] };
       const loaded = data.messages ?? [];
@@ -646,14 +646,14 @@ export function RevengeStudio() {
 
   const handleDeleteConversation = async (id: string) => {
     setMenuConvId(null);
-    await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+    await apiFetch(`/api/conversations/${id}`, { method: "DELETE" });
     setConversations((prev) => prev.filter((c) => c.id !== id));
     if (activeConvId === id) handleNewChat();
   };
 
   const handleTogglePin = async (conv: ConversationRow) => {
     setMenuConvId(null);
-    await fetch(`/api/conversations/${conv.id}`, {
+    await apiFetch(`/api/conversations/${conv.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pinned: !conv.pinned }),
@@ -665,7 +665,7 @@ export function RevengeStudio() {
     const title = renameDraft.trim();
     setRenamingId(null);
     if (!title) return;
-    await fetch(`/api/conversations/${id}`, {
+    await apiFetch(`/api/conversations/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
@@ -1444,7 +1444,7 @@ export function RevengeStudio() {
       .find((m) => m.role === "user");
     if (!prevUser) return;
     if (activeConvId && !assistantMsgId.startsWith("assistant-")) {
-      await fetch(`/api/conversations/${activeConvId}`, {
+      await apiFetch(`/api/conversations/${activeConvId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "truncateFrom", messageId: assistantMsgId }),
@@ -1462,7 +1462,7 @@ export function RevengeStudio() {
     const idx = messages.findIndex((m) => m.id === msgId);
     if (idx === -1) return;
     if (activeConvId && !msgId.startsWith("user-")) {
-      await fetch(`/api/conversations/${activeConvId}`, {
+      await apiFetch(`/api/conversations/${activeConvId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "truncateFrom", messageId: msgId }),
@@ -1476,7 +1476,7 @@ export function RevengeStudio() {
 
   const handleFork = async (messageId: string) => {
     if (!activeConvId) return;
-    const res = await fetch(`/api/conversations/${activeConvId}`, {
+    const res = await apiFetch(`/api/conversations/${activeConvId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "fork", messageId }),
@@ -1490,7 +1490,7 @@ export function RevengeStudio() {
 
   const handleToggleBookmark = async (messageId: string) => {
     if (!activeConvId || messageId.startsWith("assistant-")) return;
-    const res = await fetch(`/api/conversations/${activeConvId}`, {
+    const res = await apiFetch(`/api/conversations/${activeConvId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "toggleBookmark", messageId }),

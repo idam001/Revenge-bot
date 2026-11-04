@@ -66,8 +66,8 @@ export function AccountPanel({ user }: Props) {
   const load = useCallback(async () => {
     try {
       const [sRes, stRes] = await Promise.all([
-        fetch("/api/settings", { cache: "no-store" }),
-        fetch("/api/stats", { cache: "no-store" }),
+        apiFetch("/api/settings", { cache: "no-store" }),
+        apiFetch("/api/stats", { cache: "no-store" }),
       ]);
       const sData = await sRes.json();
       const stData = await stRes.json();
@@ -115,7 +115,7 @@ export function AccountPanel({ user }: Props) {
       const convs = data.conversations ?? [];
       const full: unknown[] = [];
       for (const c of convs) {
-        const r = await fetch(`/api/conversations/${c.id}`, { cache: "no-store" });
+        const r = await apiFetch(`/api/conversations/${c.id}`, { cache: "no-store" });
         if (r.ok) full.push(await r.json());
       }
       const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), conversations: full }, null, 2)], {

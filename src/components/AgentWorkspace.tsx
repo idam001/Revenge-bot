@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { ALL_MODELS, getModelById } from "@/lib/revenge-registry";
+import { apiFetch } from "@/lib/api-client";
 
 /* ------------------------------------------------------------------ */
 
@@ -163,7 +164,7 @@ export function AgentWorkspace({
 
   const refreshSessions = useCallback(async () => {
     try {
-      const res = await fetch("/api/agent?list=1");
+      const res = await apiFetch("/api/agent?list=1");
       if (!res.ok) return;
       const data = (await res.json()) as { sessions?: AgentSessionInfo[]; e2bConfigured?: boolean };
       setSessions(data.sessions ?? []);
@@ -296,7 +297,7 @@ export function AgentWorkspace({
       readerAbort.current = ctrl;
 
       try {
-        const res = await fetch("/api/agent", {
+        const res = await apiFetch("/api/agent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "start", task, title: task.slice(0, 80), modelId, mode }),
@@ -356,7 +357,7 @@ export function AgentWorkspace({
     readerAbort.current?.abort();
     if (sessionId && token) {
       try {
-        await fetch("/api/agent", {
+        await apiFetch("/api/agent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "cancel", sessionId, token }),
@@ -378,7 +379,7 @@ export function AgentWorkspace({
     const tok = tokens[id];
     if (!tok) return;
     try {
-      const res = await fetch(`/api/agent?sessionId=${id}&token=${tok}`);
+      const res = await apiFetch(`/api/agent?sessionId=${id}&token=${tok}`);
       if (!res.ok) return;
       const data = (await res.json()) as {
         session?: { id: string; title: string; modelId: string; mode: string; status: string; summary?: string };
@@ -433,7 +434,7 @@ export function AgentWorkspace({
   const filesApi = useCallback(
     async (op: string, extra: Record<string, unknown> = {}) => {
       if (!sessionId || !token) throw new Error("No active session.");
-      const res = await fetch("/api/agent/files", {
+      const res = await apiFetch("/api/agent/files", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId, token, op, path: cwd === "." ? undefined : cwd, ...extra }),
@@ -487,7 +488,7 @@ export function AgentWorkspace({
 
   const downloadZip = useCallback(async () => {
     if (!sessionId || !token) return;
-    const res = await fetch("/api/agent/zip", {
+    const res = await apiFetch("/api/agent/zip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId, token }),

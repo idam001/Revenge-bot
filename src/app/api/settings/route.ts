@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { appSettings, memories } from "@/db/schema";
 import { getOwner } from "@/lib/auth";
+import { serverError } from "@/lib/api-response";
 import { and, desc, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -47,8 +48,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ settings, memories: memoryList });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to load settings";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Failed to load settings");
   }
 }
 
@@ -120,8 +120,7 @@ export async function PUT(req: Request) {
 
     return NextResponse.json({ settings: updated });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to save settings";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Failed to save settings");
   }
 }
 
@@ -183,7 +182,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ error: "Invalid memory action" }, { status: 400 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Memory action failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Memory action failed");
   }
 }

@@ -4,6 +4,7 @@ import { db, ensureDbSchema } from "@/db";
 import { conversations, messages } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getOwner } from "@/lib/auth";
+import { serverError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export async function POST(req: Request) {
     if (!body.conversationId) {
       return NextResponse.json({ error: "conversationId required" }, { status: 400 });
     }
-    const owner = await getOwner();
+    const owner = await getOwner({ request: req });
     if (!owner) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
@@ -44,8 +45,7 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ token, path: `/share/${token}` });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Share failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Share failed");
   }
 }
 
@@ -62,7 +62,6 @@ export async function DELETE(req: Request) {
       .where(eq(conversations.shareToken, body.token));
     return NextResponse.json({ ok: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Revoke failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(err, "Revoke failed");
   }
 }
