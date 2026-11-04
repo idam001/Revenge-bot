@@ -2289,6 +2289,15 @@ export function RevengeStudio() {
           <div className="flex items-center gap-1 min-w-0">
             <button
               type="button"
+              onClick={() => openVault("vault")}
+              title="Add your own API key — OpenAI, Claude, Gemini, Groq, OpenRouter…"
+              aria-label="Add API key"
+              className="h-9 w-9 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--bg-elevated-2)] hover:text-[var(--text-primary)] transition cursor-pointer shrink-0"
+            >
+              <KeyRound className="w-[17px] h-[17px]" />
+            </button>
+            <button
+              type="button"
               onClick={() => setModelPickerOpen(true)}
               className="h-9 px-2.5 rounded-lg flex items-center gap-1 text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated-2)] hover:text-[var(--text-primary)] transition cursor-pointer min-w-0"
             >
@@ -2344,7 +2353,11 @@ export function RevengeStudio() {
   if (agentView) {
     return (
       <div className="flex h-dvh w-full overflow-hidden bg-[var(--bg-main)] text-[var(--text-primary)]">
-        <AgentWorkspace initialModelId={selectedModelId} onExit={() => setAgentView(false)} />
+        <AgentWorkspace
+          initialModelId={selectedModelId}
+          onExit={() => setAgentView(false)}
+          onOpenKeys={() => openVault("vault")}
+        />
       </div>
     );
   }

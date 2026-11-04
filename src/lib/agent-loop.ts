@@ -240,6 +240,34 @@ export function isQuotaOrRateError(err: unknown): boolean {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  Conversation vs. work                                              */
+/* ------------------------------------------------------------------ */
+
+const GREETING = /^\s*(hi|hey|hello|yo|sup|hiya|howdy|good\s+(morning|afternoon|evening)|morning|evening|thanks|thank\s+you|thx|ty|ok|okay|cool|nice|great|awesome|perfect|got\s+it|understood|sure|yep|nope|how\s+are\s+you|how're\s+you|what'?s\s+up|whats\s+up|who\s+are\s+you|what\s+can\s+you\s+do|test|testing|ping|are\s+you\s+there|you\s+there|bye|goodbye|see\s+ya|lol|haha)\b/i;
+
+const WORK_VERB = /\b(build|create|make|write|generate|implement|scaffold|set\s*up|setup|install|run|execute|test|debug|fix|refactor|add|remove|delete|update|change|deploy|launch|code|program|script|app|api|website|component|function|file|project|npm|pip|python|node|react|flask|django|html|css|json|sql|error|traceback|bug|convert|rename|move|zip|refactor)\b/i;
+
+/**
+ * True when this message is just conversation — a greeting, thanks, a question
+ * about the agent — rather than a request to build or run something.
+ *
+ * Conversational turns get a normal short chat reply. Without this the agent
+ * loop forces an action fence and nags the model forever, which produces an
+ * internal monologue instead of an answer.
+ */
+export function isConversationalMessage(task: string): boolean {
+  const t = task.trim();
+  if (!t) return true;
+  if (t.includes("```")) return false;
+  if (/\/[\w.-]+\.[a-z]{1,4}\b/.test(t) || /https?:\/\//i.test(t)) return false;
+  if (WORK_VERB.test(t)) return false;
+  if (t.length <= 160 && GREETING.test(t)) return true;
+  // A short question aimed at the agent itself ("can you see my files?")
+  if (t.length <= 60 && /\?\s*$/.test(t) && /\b(you|your|u)\b/i.test(t)) return true;
+  return false;
+}
+
 export function agentCapability(modelId: string): "native-tools" | "structured-actions" | "chat-only" {
   try {
     const ep = resolveAgentEndpoint(modelId, {});
@@ -249,6 +277,47 @@ export function agentCapability(modelId: string): "native-tools" | "structured-a
   }
 }
 
+/**
+ * Small free models "think out loud" and echo the system prompt before the real
+ * answer, e.g.
+ *   "The user just said Hi. No action blocks.
+
+So a friendly greeting.Hi there!"
+ * Drop every sentence that is meta-commentary and keep the actual reply.
+ */
+const META_SENTENCE =
+  /\b(action block|action fence|system prompt|the instructions|according to|one to three|short sentences|think out loud|no tools|no action|plain,? warm|brief prose|i should (?:reply|respond|answer|output|greet|just)|i (?:need|have) to (?:reply|respond|output)|the user (?:just )?(?:said|is asking|asks|wants|greeted|asked)|restate|the assistant should|output only the reply|this is a conversational|just a (?:friendly|quick|brief|short|simple|warm)|^\s*so,? just|^\s*so just)\b/i;
+
+/** Split into sentences, tolerating "greeting.Hi!" with no space after the dot. */
+function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+(?=[A-Z"'(])|(?<=[a-z][.!?])(?=[A-Z"'(][a-z])/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+export function stripReasoningPreamble(input: string): string {
+  const text = (input ?? "").trim();
+  if (!text) return text;
+  const sentences = splitSentences(text);
+  if (sentences.length === 0) return text;
+  const kept = sentences.filter((line) => !META_SENTENCE.test(line));
+  // Some models write the answer twice (draft then final). Keep the last copy.
+  const joined = kept.join(" ").replace(/\s+/g, " ").trim();
+  const half = Math.floor(joined.length / 2);
+  let out = joined;
+  if (joined.length > 80) {
+    const head = joined.slice(0, half).trim();
+    if (head.length > 20 && joined.slice(half).trim().startsWith(head.slice(0, 20))) {
+      out = joined.slice(half).trim();
+    }
+  }
+  // Never blank out the answer: if everything looked meta, fall back to the
+  // tail of the original — the real reply is almost always at the end.
+  if (out.length >= 2) return out;
+  const last = sentences[sentences.length - 1];
+  return last && last.length >= 2 ? last : text;
+}
 const AGENT_SYSTEM = `You are REVENGE Agent, an autonomous coding agent running inside REVENGE GPT with a real isolated Linux cloud sandbox (Firecracker microVM). You have genuine tools that execute real commands, manipulate real files, and return real output. Never claim an action succeeded without tool output proving it.
 
 WORKSPACE: All project files live under /home/user/workspace. Stay inside it.
@@ -263,6 +332,14 @@ After the action block(s), add a one-line note of what you expect. The real tool
 
 WORKFLOW: plan briefly → inspect_project first → create files → install deps → run/build → read real errors → fix → rerun → run_tests → summarize verified results with the exact file list.
 RULES: complete files only, no placeholders; fix real errors from tool output, never invent results; keep each turn focused; when the task is fully verified, reply with the final summary and no action block.`;
+
+// Deliberately tiny. Small free models will happily repeat a long system
+// prompt back at the user, so the chat prompt says almost nothing.
+const CHAT_SYSTEM = "You are REVENGE, a friendly coding assistant with a real sandbox. Answer the user directly and briefly, in your own words.";
+
+export function buildChatSystemPrompt(custom?: string): string {
+  return custom?.trim() ? `${CHAT_SYSTEM}\n\nPROJECT INSTRUCTIONS:\n${custom.trim()}` : CHAT_SYSTEM;
+}
 
 function buildAgentSystemPrompt(custom?: string): string {
   return custom?.trim() ? `${AGENT_SYSTEM}\n\nPROJECT INSTRUCTIONS:\n${custom.trim()}` : AGENT_SYSTEM;
@@ -518,7 +595,7 @@ export async function runAgentLoop(
   const emit = (type: AgentEvent["type"], extra: Record<string, unknown> = {}) => {
     const clean: Record<string, unknown> = { ...extra };
     if (typeof clean.text === "string") clean.text = sanitizeModelText(clean.text);
-    if (typeof clean.summary === "string") clean.summary = sanitizeModelText(clean.summary);
+    if (typeof clean.summary === "string") clean.summary = stripReasoningPreamble(sanitizeModelText(clean.summary));
     opts.emit({ type, sessionId: opts.sessionId, timestamp: new Date().toISOString(), ...clean });
   };
 
@@ -604,6 +681,60 @@ export async function runAgentLoop(
       const msg = err instanceof Error ? err.message : "Plan failed";
       emit("agent.failed", { error: msg });
       return { status: "failed", summary: msg, toolCallCount: 0, iterations: 0 };
+    }
+  }
+
+  // Pure conversation (a greeting, thanks, "what can you do?") gets a normal
+  // chat answer. Forcing the action-fence loop here is what produced the
+  // internal monologue the user saw on "Hi".
+  if (isConversationalMessage(opts.task)) {
+    const chatPrompt = buildChatSystemPrompt(opts.customSystemPrompt);
+    try {
+      let reply = "";
+      if (endpoint.kind === "anthropic") {
+        const r = await anthropicChat({
+          apiKey: endpoint.apiKey!,
+          model: endpoint.model,
+          system: chatPrompt,
+          messages: [
+            ...(opts.history ?? []).map((m) => ({ role: m.role, content: m.content })),
+            { role: "user", content: opts.task },
+          ],
+          temperature,
+          maxTokens: 700,
+        });
+        reply = r.text;
+      } else {
+        const r = await openaiChat({
+          url: endpoint.url,
+          apiKey: endpoint.apiKey,
+          model: endpoint.model,
+          messages: [
+            { role: "system", content: chatPrompt },
+            ...(opts.history ?? []).map((m) => ({ role: m.role, content: m.content })),
+            { role: "user", content: opts.task },
+          ],
+          temperature,
+          maxTokens: 700,
+          stream: true,
+          extraHeaders: endpoint.extraHeaders,
+          onText: (t) => emit("agent.thinking", { text: t }),
+        });
+        reply = r.text;
+      }
+      const clean =
+        stripReasoningPreamble(sanitizeModelText(reply)) ||
+        "I'm here — what would you like me to build or run?";
+      emit("agent.completed", { summary: clean, toolCallCount: 0, iterations: 1, conversational: true });
+      return { status: "completed", summary: clean, toolCallCount: 0, iterations: 1 };
+    } catch (err) {
+      // If the chat reply itself fails, fall through to the normal loop so the
+      // message is never swallowed.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!isQuotaOrRateError(err)) {
+        emit("agent.failed", { error: msg });
+        return { status: "failed", summary: msg, toolCallCount: 0, iterations: 0 };
+      }
     }
   }
 
@@ -778,6 +909,17 @@ export async function runAgentLoop(
         const saysDone =
           /\b(done|finished|complete|completed|all set|everything is (working|ready)|successfully)\b/i.test(text) &&
           !isPreamble;
+        // A genuine question back to the user ("what should it do?") is a valid
+        // end to the turn — answer, don't nag it into another loop.
+        const asksUser =
+          /\?\s*$/.test(text) &&
+          /\b(what|which|how|where|do you|would you|should i|could you|can you tell)\b/i.test(text) &&
+          !/\b(let me|i will|i'll|now i)\b/i.test(text);
+        if (asksUser) {
+          finalSummary = text;
+          emit("agent.completed", { summary: finalSummary, toolCallCount, iterations: iteration, conversational: true });
+          return { status: "completed", summary: finalSummary, toolCallCount, iterations: iteration };
+        }
         if (!saysDone && history.length > 0) {
           history.push({ role: "assistant", content: r.text });
           history.push({

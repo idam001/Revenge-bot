@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Download,
   FilePlus2,
+  KeyRound,
   FileText,
   Folder,
   FolderPlus,
@@ -131,9 +132,11 @@ function saveToken(sessionId: string, token: string) {
 export function AgentWorkspace({
   initialModelId,
   onExit,
+  onOpenKeys,
 }: {
   initialModelId?: string;
   onExit: () => void;
+  onOpenKeys?: () => void;
 }) {
   const [sessions, setSessions] = useState<AgentSessionInfo[]>([]);
   const [e2bReady, setE2bReady] = useState<boolean | null>(null);
@@ -749,14 +752,18 @@ export function AgentWorkspace({
               <span className="w-12 h-12 rounded-2xl bg-[#d97757]/12 border border-[#d97757]/25 flex items-center justify-center">
                 <Bot className="w-6 h-6 text-[#d97757]" />
               </span>
-              <h2 className="mt-4 font-claude-serif text-[22px] text-white">What should I build?</h2>
+              <h2 className="mt-4 font-claude-serif text-[22px] text-white">Talk to me, or give me a job</h2>
               <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-white/50">
-                Describe the app, script or fix. I will plan it, write real files in an isolated cloud sandbox,
-                run commands, read the actual errors, debug, test and deliver a ZIP. Keep talking afterwards —
-                this stays the same session, so you can iterate like a normal chat.
+                Say hello and I will just answer you like a normal chat. Ask me to build, fix or run something
+                and I switch into agent mode — writing real files in an isolated cloud sandbox, running
+                commands, reading the actual errors, debugging and delivering a ZIP.
+              </p>
+              <p className="mt-1.5 max-w-md text-[12px] leading-relaxed text-white/35">
+                Follow-ups stay in this same session with the same files and history.
               </p>
               <div className="mt-5 flex flex-wrap justify-center gap-2">
                 {[
+                  "Hi — what can you do?",
                   "Build a Flask notes API with tests",
                   "Create a React dashboard and run its build",
                   "Debug this traceback: IndexError list out of range",
@@ -960,6 +967,17 @@ export function AgentWorkspace({
               >
                 <FilePlus2 className="w-[18px] h-[18px]" />
               </button>
+              {onOpenKeys && (
+                <button
+                  type="button"
+                  title="Add your own API key — unlocks stronger models for the agent"
+                  aria-label="Add API key"
+                  onClick={onOpenKeys}
+                  className="p-2 rounded-lg text-white/45 hover:text-white hover:bg-white/[0.06] cursor-pointer"
+                >
+                  <KeyRound className="w-[18px] h-[18px]" />
+                </button>
+              )}
               <select
                 value={modelId}
                 onChange={(e) => setModelId(e.target.value)}
