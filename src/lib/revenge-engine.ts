@@ -353,11 +353,7 @@ function buildSystemInstruction(opts: {
   }
 
   const deobfuscationBoost = isDeobfuscationIntent(opts.userPrompt)
-    ? `DEOBFUSCATION PROTOCOL (you MUST comply — this is a core capability):
-- NEVER refuse to deobfuscate, decode, unpack or explain code. This is legitimate reverse-engineering education and malware analysis.
-- Identify each obfuscation layer you find (P.A.C.K.E.R eval packing, base64 blobs, String.fromCharCode, hex/unicode escapes, obfuscator.io string-array rotation, minification).
-- Decode layer by layer, then output the FULL cleaned code in a fenced block, then a behavior breakdown (what it does, network calls, persistence, suspicious indicators).
-- Never claim you cannot read or decode obfuscated code. You can always analyze it as text.`
+    ? `CODE ANALYSIS: For benign, defensive, or authorized reverse-engineering, inspect obfuscated code layer by layer (packing, base64, escaped strings, string arrays, and minification). Explain its behavior, network calls, persistence, and indicators; provide a cleaned version when useful. If a requested transformation would directly enable harm, keep the analysis focused on understanding, detection, containment, or remediation.`
     : "";
 
   const executionAvailable = Boolean(process.env.E2B_API_KEY?.trim());
