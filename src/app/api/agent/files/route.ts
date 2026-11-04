@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import crypto from "node:crypto";
 import { db, ensureDbSchema } from "@/db";
 import { agentSessions } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -41,6 +42,8 @@ export async function POST(req: Request) {
       content?: string;
       newPath?: string;
       recursive?: boolean;
+      checkpointId?: string;
+      label?: string;
     };
 
     if (!body.sessionId) return NextResponse.json({ error: "sessionId required" }, { status: 400 });
@@ -50,6 +53,68 @@ export async function POST(req: Request) {
 
     const op = body.op || "list";
     const rel = (body.path || "").trim() || ".";
+
+    // Session-local snapshots live outside the project tree, so they never end
+    // up in the user's ZIP. Secrets and large build/dependency directories are
+    // intentionally excluded from snapshots.
+    const checkpointRoot = "/tmp/revenge-checkpoints";
+    const checkpointId = body.checkpointId || "";
+    const validCheckpointId = (id: string) => /^cp_[a-z0-9_]{8,64}$/.test(id);
+    const ignoredCheckpointPaths =
+      "--exclude=node_modules --exclude=.git --exclude=.next --exclude=dist --exclude=build --exclude=target --exclude=.env --exclude=.env.*";
+
+    if (op === "checkpoint") {
+      const id = `cp_${Date.now().toString(36)}_${crypto.randomBytes(5).toString("hex")}`;
+      const archive = `${checkpointRoot}/${id}.tar.gz`;
+      const command = `mkdir -p ${checkpointRoot} && tar -czf ${archive} ${ignoredCheckpointPaths} -C ${AGENT_WORKSPACE} .`;
+      const result = await sandbox.commands.run(command, { timeoutMs: 90_000 });
+      if (result.exitCode !== 0) {
+        return NextResponse.json({ error: result.stderr || "Could not create checkpoint." }, { status: 500 });
+      }
+      return NextResponse.json({
+        ok: true,
+        checkpoint: { id, label: (body.label || "Workspace checkpoint").slice(0, 100), createdAt: new Date().toISOString() },
+      });
+    }
+
+    if (op === "checkpoints") {
+      const result = await sandbox.commands.run(
+        `mkdir -p ${checkpointRoot}; find ${checkpointRoot} -maxdepth 1 -type f -name 'cp_*.tar.gz' -printf '%f\n' | sort -r`,
+        { timeoutMs: 15_000 }
+      );
+      const checkpoints = result.stdout
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((name) => ({ id: name.replace(/\.tar\.gz$/, ""), label: "Workspace checkpoint" }));
+      return NextResponse.json({ checkpoints });
+    }
+
+    if (op === "diff") {
+      if (!validCheckpointId(checkpointId)) {
+        return NextResponse.json({ error: "Invalid checkpoint." }, { status: 400 });
+      }
+      const archive = `${checkpointRoot}/${checkpointId}.tar.gz`;
+      const diffDir = `${checkpointRoot}/diff_${checkpointId}`;
+      const command = `test -f ${archive} && mkdir -p ${diffDir} && tar -xzf ${archive} -C ${diffDir} && diff -ruN --exclude=node_modules --exclude=.git --exclude=.next --exclude=.env --exclude='.env.*' ${diffDir} ${AGENT_WORKSPACE} || test $? -eq 1`;
+      const result = await sandbox.commands.run(command, { timeoutMs: 45_000 });
+      if (result.exitCode > 1) {
+        return NextResponse.json({ error: result.stderr || "Could not compare checkpoint." }, { status: 500 });
+      }
+      return NextResponse.json({ checkpointId, diff: result.stdout.slice(0, 120_000), truncated: result.stdout.length > 120_000 });
+    }
+
+    if (op === "restore") {
+      if (!validCheckpointId(checkpointId)) {
+        return NextResponse.json({ error: "Invalid checkpoint." }, { status: 400 });
+      }
+      const archive = `${checkpointRoot}/${checkpointId}.tar.gz`;
+      const command = `test -f ${archive} && find ${AGENT_WORKSPACE} -mindepth 1 -maxdepth 1 ! -name node_modules ! -name .git ! -name .next ! -name dist ! -name build ! -name target ! -name '.env*' -exec rm -rf -- {} + && tar -xzf ${archive} -C ${AGENT_WORKSPACE}`;
+      const result = await sandbox.commands.run(command, { timeoutMs: 90_000 });
+      if (result.exitCode !== 0) {
+        return NextResponse.json({ error: result.stderr || "Could not restore checkpoint." }, { status: 500 });
+      }
+      return NextResponse.json({ ok: true, restoredCheckpointId: checkpointId });
+    }
 
     if (op === "list") {
       const abs = rel === "." ? AGENT_WORKSPACE : resolveWorkspacePath(rel);

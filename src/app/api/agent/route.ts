@@ -31,6 +31,47 @@ function sseEncode(payload: AgentEvent): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+/** Snapshot only project files; keep archives outside the downloadable workspace. */
+async function createWorkspaceCheckpoint(
+  sandbox: Awaited<ReturnType<typeof createAgentSandbox>>,
+  sessionId: string,
+  label: string
+): Promise<{ id: string; label: string; createdAt: string } | null> {
+  const id = `cp_${Date.now().toString(36)}_${crypto.randomBytes(5).toString("hex")}`;
+  const root = `/tmp/revenge-checkpoints/${sessionId}`;
+  const archive = `${root}/${id}.tar.gz`;
+  try {
+    const result = await sandbox.commands.run(
+      `mkdir -p ${root} && tar -czf ${archive} --exclude=node_modules --exclude=.git --exclude=.next --exclude=dist --exclude=build --exclude=target --exclude=.env --exclude='.env.*' -C /home/user/workspace .`,
+      { timeoutMs: 90_000 }
+    );
+    if (result.exitCode !== 0) return null;
+    return { id, label: label.slice(0, 100), createdAt: new Date().toISOString() };
+  } catch {
+    // A snapshot failure must never prevent the agent from doing the requested work.
+    return null;
+  }
+}
+
+async function diffWorkspaceCheckpoint(
+  sandbox: Awaited<ReturnType<typeof createAgentSandbox>>,
+  sessionId: string,
+  checkpointId: string
+): Promise<string> {
+  const root = `/tmp/revenge-checkpoints/${sessionId}`;
+  const archive = `${root}/${checkpointId}.tar.gz`;
+  const compare = `${root}/compare_${checkpointId}`;
+  try {
+    const result = await sandbox.commands.run(
+      `if [ ! -f ${archive} ]; then echo 'Checkpoint not found' >&2; exit 2; fi; mkdir -p ${compare}; tar -xzf ${archive} -C ${compare}; diff -ruN --exclude=node_modules --exclude=.git --exclude=.next --exclude=.env --exclude='.env.*' ${compare} /home/user/workspace; code=$?; rm -rf ${compare}; if [ $code -gt 1 ]; then exit $code; fi; exit 0`,
+      { timeoutMs: 45_000 }
+    );
+    return result.exitCode > 1 ? result.stderr.slice(0, 4000) : result.stdout.slice(0, 100_000);
+  } catch (err) {
+    return `Could not generate the diff: ${err instanceof Error ? err.message : "sandbox command failed"}`;
+  }
+}
+
 async function loadSession(sessionId: string, token?: string, req?: Request) {
   const [session] = await db.select().from(agentSessions).where(eq(agentSessions.id, sessionId));
   if (!session) return null;
@@ -273,6 +314,8 @@ export async function POST(req: Request) {
               .update(agentSessions)
               .set({ sandboxId: sb.sandboxId, updatedAt: new Date() })
               .where(eq(agentSessions.id, continueId));
+            const before2 = await createWorkspaceCheckpoint(sb, continueId, `Before: ${task}`);
+            if (before2) send2({ type: "agent.checkpoint", sessionId: continueId, timestamp: before2.createdAt, ...before2, stage: "before" });
 
             let seq2 = 0;
             const outcome2 = await runAgentLoop(sb, {
@@ -303,6 +346,20 @@ export async function POST(req: Request) {
               },
             });
 
+            if (before2 && outcome2.toolCallCount > 0) {
+              const after2 = await createWorkspaceCheckpoint(sb, continueId, `After: ${task}`);
+              const diff2 = await diffWorkspaceCheckpoint(sb, continueId, before2.id);
+              if (diff2.trim()) {
+                send2({
+                  type: "agent.diff",
+                  sessionId: continueId,
+                  timestamp: new Date().toISOString(),
+                  checkpointId: before2.id,
+                  checkpointAfterId: after2?.id ?? null,
+                  diff: diff2,
+                });
+              }
+            }
             const persistedSummary =
               outcome2.status === "completed" && !outcome2.conversational
                 ? polishFinalAnswer(outcome2.summary, {
@@ -458,6 +515,8 @@ export async function POST(req: Request) {
             .update(agentSessions)
             .set({ sandboxId: sandbox.sandboxId, updatedAt: new Date() })
             .where(eq(agentSessions.id, session.id));
+          const before = await createWorkspaceCheckpoint(sandbox, session.id, `Before: ${task}`);
+          if (before) send({ type: "agent.checkpoint", sessionId: session.id, timestamp: before.createdAt, ...before, stage: "before" });
 
           let seq = 0;
           const outcome = await runAgentLoop(sandbox, {
@@ -491,6 +550,20 @@ export async function POST(req: Request) {
             },
           });
 
+          if (before && outcome.toolCallCount > 0) {
+            const after = await createWorkspaceCheckpoint(sandbox, session.id, `After: ${task}`);
+            const diff = await diffWorkspaceCheckpoint(sandbox, session.id, before.id);
+            if (diff.trim()) {
+              send({
+                type: "agent.diff",
+                sessionId: session.id,
+                timestamp: new Date().toISOString(),
+                checkpointId: before.id,
+                checkpointAfterId: after?.id ?? null,
+                diff,
+              });
+            }
+          }
           const persistedSummary =
             outcome.status === "completed" && !outcome.conversational
               ? polishFinalAnswer(outcome.summary, {

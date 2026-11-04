@@ -175,6 +175,10 @@ export function AgentWorkspace({
   const [openFile, setOpenFile] = useState<{ path: string; content: string; dirty: boolean } | null>(null);
   const [newName, setNewName] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewDiff, setReviewDiff] = useState<string | null>(null);
+  const [reviewCheckpointId, setReviewCheckpointId] = useState<string | null>(null);
+  const [restoringCheckpoint, setRestoringCheckpoint] = useState(false);
 
   const feedRef = useRef<HTMLDivElement | null>(null);
   const readerAbort = useRef<AbortController | null>(null);
@@ -282,6 +286,10 @@ export function AgentWorkspace({
         upsertTool(String(evt.executionId ?? ""), {
           stdout: `Background process started (pid ${String(evt.pid ?? "?")}).`,
         } as Partial<FeedTool>);
+      } else if (type === "agent.diff") {
+        setReviewDiff(String(evt.diff ?? ""));
+        setReviewCheckpointId(typeof evt.checkpointId === "string" ? evt.checkpointId : null);
+        setReviewOpen(true);
       } else if (type === "agent.status") {
         const txt = String(evt.text ?? "");
         if (txt) {
@@ -359,6 +367,9 @@ export function AgentWorkspace({
         },
       ]);
       setFeed([]);
+      setReviewDiff(null);
+      setReviewCheckpointId(null);
+      setReviewOpen(false);
       setInput("");
       setStatus("running");
       setRunning(true);
@@ -499,6 +510,9 @@ export function AgentWorkspace({
       if (!data.session) return;
       setSessionId(data.session.id);
       setToken(tok);
+      setReviewDiff(null);
+      setReviewCheckpointId(null);
+      setReviewOpen(false);
       setTaskTitle(data.session.title);
       setStatus(data.session.status);
       setModelId(data.session.modelId);
@@ -650,6 +664,22 @@ export function AgentWorkspace({
     [sessionId, filesApi, refreshFiles]
   );
 
+  const restoreReviewCheckpoint = async () => {
+    if (!sessionId || !token || !reviewCheckpointId || restoringCheckpoint) return;
+    setRestoringCheckpoint(true);
+    try {
+      await filesApi("restore", { checkpointId: reviewCheckpointId });
+      setReviewOpen(false);
+      setReviewDiff(null);
+      setReviewCheckpointId(null);
+      if (filesOpen) void refreshFiles();
+    } catch (err) {
+      setReviewDiff(`Restore failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setRestoringCheckpoint(false);
+    }
+  };
+
   /* ------------------------------ render ------------------------------ */
 
   const statusColor =
@@ -697,6 +727,17 @@ export function AgentWorkspace({
           >
             <FolderOpen className="w-[18px] h-[18px]" />
           </button>
+          {reviewDiff !== null && (
+            <button
+              type="button"
+              onClick={() => setReviewOpen(true)}
+              title="Review file changes and restore the previous checkpoint"
+              aria-label="Review file changes"
+              className="px-2 h-9 rounded-lg hover:bg-white/[0.06] text-[11.5px] text-[#d97757] hover:text-[#e8896b] cursor-pointer"
+            >
+              Review changes
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -1209,6 +1250,48 @@ export function AgentWorkspace({
             </>
           )}
         </aside>
+      )}
+
+      {/* Run change review + rollback */}
+      {reviewOpen && reviewDiff !== null && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-3 sm:p-6"
+          onClick={() => setReviewOpen(false)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="agent-review-title"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-4xl max-h-[88dvh] rounded-2xl border border-white/10 bg-[#1d1c1a] shadow-2xl flex flex-col overflow-hidden"
+          >
+            <header className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.08]">
+              <div className="min-w-0 flex-1">
+                <h2 id="agent-review-title" className="text-[14px] font-semibold text-white">Review file changes</h2>
+                <p className="mt-0.5 text-[11.5px] text-white/45">The agent changed its sandbox workspace. Review the diff or restore the checkpoint from before this run.</p>
+              </div>
+              <button type="button" onClick={() => setReviewOpen(false)} aria-label="Close change review" className="p-2 rounded-lg hover:bg-white/[0.06] text-white/55 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </header>
+            <div className="flex-1 min-h-0 overflow-auto p-3 sm:p-4">
+              {reviewDiff.trim() ? (
+                <pre className="rounded-xl border border-white/[0.07] bg-black/35 p-3 font-mono text-[11px] leading-relaxed text-white/75 whitespace-pre-wrap break-words overflow-x-auto">{reviewDiff}</pre>
+              ) : (
+                <div className="py-12 text-center text-[13px] text-white/45">No file changes were detected for this run.</div>
+              )}
+            </div>
+            <footer className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-white/[0.08]">
+              <span className="text-[11px] text-white/35">Changes are already in the isolated sandbox. Restore undoes them.</span>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setReviewOpen(false)} className="h-9 px-3 rounded-lg border border-white/10 text-[12px] text-white/65 hover:bg-white/[0.05] cursor-pointer">Keep changes</button>
+                <button type="button" onClick={() => void restoreReviewCheckpoint()} disabled={!reviewCheckpointId || restoringCheckpoint} className="h-9 px-3 rounded-lg bg-red-500/15 border border-red-400/25 text-[12px] text-red-200 hover:bg-red-500/25 disabled:opacity-40 cursor-pointer">
+                  {restoringCheckpoint ? "Restoring…" : "Undo this run"}
+                </button>
+              </div>
+            </footer>
+          </section>
+        </div>
       )}
 
       {/* Session history */}

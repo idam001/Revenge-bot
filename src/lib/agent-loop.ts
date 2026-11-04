@@ -19,6 +19,8 @@ export type { SavedProviderConfig } from "./revenge-engine";
 export type AgentEventType =
   | "agent.started"
   | "agent.thinking"
+  | "agent.checkpoint"
+  | "agent.diff"
   | "agent.status"
   | "agent.message"
   | "tool.queued"
