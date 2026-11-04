@@ -81,6 +81,7 @@ import {
   type ProviderStatusItem,
 } from "./UniversalVaultModal";
 import { AccountMenu } from "./AccountMenu";
+import { apiFetch, primeGuestScope } from "@/lib/api-client";
 import { ModelPickerModal } from "./ModelPickerModal";
 import { PromptArsenalModal } from "./PromptArsenalModal";
 import { SparkIcon } from "./SparkIcon";
@@ -471,7 +472,7 @@ export function RevengeStudio() {
 
   const loadConversations = useCallback(async () => {
     try {
-      const res = await fetch("/api/conversations");
+      const res = await apiFetch("/api/conversations");
       if (res.ok) {
         const data = (await res.json()) as { conversations?: ConversationRow[] };
         setConversations(data.conversations ?? []);
@@ -483,7 +484,7 @@ export function RevengeStudio() {
 
   const loadProviders = useCallback(async () => {
     try {
-      const res = await fetch("/api/providers");
+      const res = await apiFetch("/api/providers");
       if (res.ok) {
         const data = (await res.json()) as { providers?: ProviderStatusItem[] };
         setProviders(data.providers ?? []);
@@ -495,7 +496,7 @@ export function RevengeStudio() {
 
   const loadSettingsAndMemories = useCallback(async () => {
     try {
-      const res = await fetch("/api/settings");
+      const res = await apiFetch("/api/settings");
       if (!res.ok) return;
       const data = (await res.json()) as {
         settings?: AppSettingsRow;
@@ -524,6 +525,7 @@ export function RevengeStudio() {
     void loadConversations();
     void loadProviders();
     void loadSettingsAndMemories();
+    void primeGuestScope();
   }, [loadConversations, loadProviders, loadSettingsAndMemories]);
 
   /* ---------- scrolling (sticky-bottom, no jitter) ---------- */
@@ -553,7 +555,7 @@ export function RevengeStudio() {
   const handleUpdateSettings = async (partial: Partial<AppSettingsRow>) => {
     setSettings((prev) => ({ ...prev, ...partial }));
     try {
-      const res = await fetch("/api/settings", {
+      const res = await apiFetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(partial),
@@ -637,7 +639,7 @@ export function RevengeStudio() {
   };
 
   const handleClearAllConversations = async () => {
-    await fetch("/api/conversations", { method: "DELETE" });
+    await apiFetch("/api/conversations", { method: "DELETE" });
     setConversations([]);
     handleNewChat();
   };
@@ -868,7 +870,7 @@ export function RevengeStudio() {
     fuAbortRef.current = ctrl;
     const timer = setTimeout(() => ctrl.abort(), 16000);
     try {
-      const res = await fetch("/api/chat", {
+      const res = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: ctrl.signal,
@@ -933,7 +935,7 @@ export function RevengeStudio() {
       isStreaming: true,
     });
     try {
-      const res = await fetch("/api/chat", {
+      const res = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1108,7 +1110,7 @@ export function RevengeStudio() {
     };
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1506,7 +1508,7 @@ export function RevengeStudio() {
     if (!activeConvId || shareBusy) return;
     setShareBusy(true);
     try {
-      const res = await fetch("/api/share", {
+      const res = await apiFetch("/api/share", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversationId: activeConvId }),
@@ -1519,7 +1521,7 @@ export function RevengeStudio() {
   const handleRevokeShare = async () => {
     if (!shareInfo) return;
     try {
-      await fetch("/api/share", {
+      await apiFetch("/api/share", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: shareInfo.token }),

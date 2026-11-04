@@ -17,6 +17,12 @@ import { cookies } from "next/headers";
 import { createSupabaseServerClient, isAuthConfigured } from "./supabase-server";
 
 export const GUEST_COOKIE = "revenge_guest";
+/**
+ * Header the browser client can use when third-party cookies are blocked or the
+ * response is cached. It is NOT an authentication credential — only an
+ * anonymous data-scope id, so it is safe for client JS to hold and send.
+ */
+export const GUEST_HEADER = "x-revenge-guest";
 export const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 
 export type OwnerKind = "user" | "guest";
@@ -57,7 +63,9 @@ export async function getGuestToken(): Promise<string> {
  * Resolve the caller. In a Route Handler you may pass { create: true } to mint
  * a guest cookie when none exists yet.
  */
-export async function getOwner(opts: { create?: boolean } = {}): Promise<Owner | null> {
+export async function getOwner(
+  opts: { create?: boolean; request?: Request } = {}
+): Promise<Owner | null> {
   const user = await getSessionUser();
   if (user) {
     return {
@@ -73,6 +81,15 @@ export async function getOwner(opts: { create?: boolean } = {}): Promise<Owner |
 
   const store = await cookies();
   let token = store.get(GUEST_COOKIE)?.value ?? "";
+
+  // Fallback: a client that could not receive the httpOnly cookie echoes the
+  // scope id back in a header. Using it keeps the same guest scope instead of
+  // silently minting a fresh one (which would orphan the user's chats).
+  if (!token && opts.request) {
+    const header = opts.request.headers.get(GUEST_HEADER)?.trim() ?? "";
+    if (/^[a-f0-9]{32,64}$/.test(header)) token = header;
+  }
+
   if (!token) {
     if (!opts.create) return null;
     token = newGuestToken();
@@ -108,7 +125,23 @@ export async function getSessionUser() {
   try {
     const {
       data: { user },
+      error,
     } = await supabase.auth.getUser();
+
+    // Distinguish "no valid session" from "could not verify right now".
+    // A network/timeout error must not silently downgrade a signed-in user
+    // into a guest context (that would look like data loss to the user).
+    if (error && !user) {
+      const isAuthError =
+        error.status === 400 ||
+        error.status === 401 ||
+        error.status === 403 ||
+        /invalid|expired|missing|jwt|token/i.test(error.message ?? "");
+      if (!isAuthError) {
+        throw new Error(`AUTH_UNAVAILABLE: ${error.message}`);
+      }
+      return null;
+    }
     if (!user) return null;
     const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
     return {

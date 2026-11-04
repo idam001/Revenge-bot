@@ -69,7 +69,7 @@ export async function POST(req: Request) {
     await ensureDbSchema();
 
     // Identity is resolved server-side; the client cannot claim another owner.
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     if (!owner) {
       return Response.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
     }

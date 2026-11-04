@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     if (!owner) {
       return NextResponse.json({ conversations: [], scoped: false });
     }
@@ -52,7 +52,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     if (!owner) {
       return NextResponse.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
     }

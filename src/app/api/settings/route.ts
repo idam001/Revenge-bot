@@ -30,10 +30,10 @@ async function getOrCreateSettings(ownerKey: string) {
   return existing;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     if (!owner) {
       return NextResponse.json({ settings: null, memories: [] });
     }
@@ -55,7 +55,7 @@ export async function GET() {
 export async function PUT(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     if (!owner) {
       return NextResponse.json({ error: "Session unavailable" }, { status: 401 });
     }
@@ -135,7 +135,7 @@ export async function POST(req: Request) {
       category?: string;
     };
 
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     if (!owner) {
       return NextResponse.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
     }

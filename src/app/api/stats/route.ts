@@ -5,10 +5,10 @@ import { getOwner } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     await ensureDbSchema();
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
     if (!owner) {
       return NextResponse.json({ chats: 0, messages: 0, images: 0, videos: 0, searches: 0, avgSpeed: 0, topModels: [] });
     }

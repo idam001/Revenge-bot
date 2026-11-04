@@ -18,6 +18,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { fetchMe, signInWithGoogle, signOut, type ClientUser } from "@/lib/auth-client";
+import { rememberGuestScope } from "@/lib/api-client";
 
 interface Props {
   /** "sidebar" shows the wide card, "header" the compact avatar. */
@@ -36,6 +37,7 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
 
   const load = useCallback(async () => {
     const me = await fetchMe();
+    if ((me as any)?.guest?.scopeId) rememberGuestScope((me as any).guest.scopeId);
     setUser(me.user);
     setAuthConfigured(me.authConfigured);
     setLoading(false);

@@ -13,6 +13,7 @@ export async function fetchMe(): Promise<{
   authenticated: boolean;
   user: ClientUser | null;
   authConfigured: boolean;
+  guest?: { scoped: boolean; scopeId?: string };
 }> {
   try {
     const res = await fetch("/api/auth/me", { cache: "no-store" });

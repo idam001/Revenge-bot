@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { signOut } from "@/lib/auth-client";
+import { apiFetch } from "@/lib/api-client";
 import {
   Check,
   Download,
@@ -92,7 +93,7 @@ export function AccountPanel({ user }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await apiFetch("/api/settings", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(patch),
@@ -109,7 +110,7 @@ export function AccountPanel({ user }: Props) {
 
   const exportChats = async () => {
     try {
-      const res = await fetch("/api/conversations", { cache: "no-store" });
+      const res = await apiFetch("/api/conversations", { cache: "no-store" });
       const data = await res.json();
       const convs = data.conversations ?? [];
       const full: unknown[] = [];
@@ -133,7 +134,7 @@ export function AccountPanel({ user }: Props) {
 
   const deleteAllChats = async () => {
     if (!confirm("Delete every conversation in your account? This cannot be undone.")) return;
-    const res = await fetch("/api/conversations", { method: "DELETE" });
+    const res = await apiFetch("/api/conversations", { method: "DELETE" });
     if (res.ok) {
       setStats((s) => (s ? { ...s, chats: 0, messages: 0 } : s));
     }

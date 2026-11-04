@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { conversations, guestMerges, memories, messages } from "@/db/schema";
-import { getOwner, getSessionUser } from "@/lib/auth";
+import { GUEST_COOKIE, getOwner, getSessionUser } from "@/lib/auth";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -10,15 +10,17 @@ export const dynamic = "force-dynamic";
  * GET /api/auth/me — who am I (also reports whether Google login is configured).
  * Creates the guest cookie on first call so guest scoping starts immediately.
  */
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const user = await getSessionUser();
-    const owner = await getOwner({ create: true });
+    const owner = await getOwner({ create: true, request: req });
 
     return NextResponse.json({
       authenticated: Boolean(user),
       user: user ?? null,
-      guest: !user && owner ? { scoped: true } : { scoped: false },
+      guest: !user && owner
+        ? { scoped: true, scopeId: owner.key.replace(/^guest:/, "") }
+        : { scoped: false },
       authConfigured: Boolean(
         process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
       ),
@@ -46,7 +48,16 @@ export async function POST(req: Request) {
 
     const body = (await req.json().catch(() => ({}))) as { action?: string };
     const owner = await getOwner();
-    const guestToken = owner?.kind === "guest" ? owner.key.replace(/^guest:/, "") : "";
+    // Read the guest token straight from the request cookie as well: getting
+    // here already required a valid user session, and a refresh may have
+    // re-written cookies in this very response.
+    const cookieToken = (req.headers.get("cookie") ?? "")
+      .split(";")
+      .map((c) => c.trim())
+      .find((c) => c.startsWith(`${GUEST_COOKIE}=`))
+      ?.slice(GUEST_COOKIE.length + 1) ?? "";
+    const ownerToken = owner?.kind === "guest" ? owner.key.replace(/^guest:/, "") : "";
+    const guestToken = cookieToken || ownerToken;
 
     if (body.action === "discard-guest") {
       return NextResponse.json({ ok: true, merged: false });
