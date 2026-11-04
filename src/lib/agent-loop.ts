@@ -424,7 +424,7 @@ export async function runAgentLoop(
   const emit = (type: AgentEvent["type"], extra: Record<string, unknown> = {}) =>
     opts.emit({ type, sessionId: opts.sessionId, timestamp: new Date().toISOString(), ...extra });
 
-  const maxIterations = opts.maxIterations ?? 12;
+  const maxIterations = opts.maxIterations ?? 18;
   const maxToolCalls = opts.maxToolCalls ?? 30;
   const temperature = opts.temperature ?? 0.4;
   const endpoint = resolveAgentEndpoint(opts.modelId, opts.savedKeysMap);
@@ -583,6 +583,11 @@ export async function runAgentLoop(
       }
 
       // Structured-action path (keyless models)
+      if (/^\s*DONE[.!]?\s*$/i.test(r.text.trim())) {
+        finalSummary = "Task completed. " + (finalSummary || "");
+        emit("agent.completed", { summary: finalSummary.trim(), toolCallCount, iterations: iteration });
+        return { status: "completed", summary: finalSummary.trim(), toolCallCount, iterations: iteration };
+      }
       const actions = parseActionBlocks(r.text);
       if (actions.length === 0) {
         if (iteration <= 4 && r.text.trim() && /write_file|execute_command|inspect_project|run_python|list_files|create_directory/.test(r.text)) {
@@ -596,12 +601,23 @@ export async function runAgentLoop(
           });
           continue;
         }
-        if (iteration <= 2 && r.text.trim()) {
+        // The model answered in prose instead of acting. That is almost never
+        // the end of the work — it usually means it lost the fence format. Keep
+        // the loop alive by restating the contract instead of stopping early.
+        const looksDone =
+          /\b(done|finished|complete|all set|everything is (working|ready))\b/i.test(r.text) &&
+          /\b(below|result|output|summary)\b/i.test(r.text);
+        if (!looksDone && history.length > 0) {
           history.push({ role: "assistant", content: r.text });
           history.push({
             role: "user",
             content:
-              "INVALID TURN: zero action blocks. Reply with EXACTLY one block:\n```action\n{\"tool\": \"inspect_project\", \"args\": {}}\n```\nNothing else.",
+              "You replied with prose and issued NO tool call, so nothing happened. " +
+              "The task is not finished yet. Continue the work NOW by emitting exactly one action fence:\n" +
+              "```action\n{\"tool\": \"<tool-name>\", \"args\": { ... }}\n```\n" +
+              "Available tools: execute_command, run_python, run_javascript, write_file, read_file, " +
+              "edit_file, list_files, create_directory, delete_file, install_package, inspect_project. " +
+              "If the task is genuinely complete, reply with the single word DONE and nothing else.",
           });
           continue;
         }
