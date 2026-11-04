@@ -166,9 +166,14 @@ export function AgentWorkspace({
     try {
       const res = await apiFetch("/api/agent?list=1");
       if (!res.ok) return;
-      const data = (await res.json()) as { sessions?: AgentSessionInfo[]; e2bConfigured?: boolean };
+      const data = (await res.json()) as {
+        sessions?: AgentSessionInfo[];
+        sandboxConfigured?: boolean;
+        e2bConfigured?: boolean;
+      };
       setSessions(data.sessions ?? []);
-      setE2bReady(data.e2bConfigured ?? null);
+      // Read the new key, falling back for older deployments.
+      setE2bReady(data.sandboxConfigured ?? data.e2bConfigured ?? null);
     } catch {
       /* ignore */
     }
