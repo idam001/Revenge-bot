@@ -11,7 +11,12 @@ import {
   isSandboxConfigured,
   killSandbox,
 } from "@/lib/e2b-manager";
-import { runAgentLoop, type AgentEvent, type SavedProviderConfig } from "@/lib/agent-loop";
+import {
+  polishFinalAnswer,
+  runAgentLoop,
+  type AgentEvent,
+  type SavedProviderConfig,
+} from "@/lib/agent-loop";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Vercel Hobby caps serverless functions at 300s
@@ -274,8 +279,16 @@ export async function POST(req: Request) {
               sessionId: continueId,
               task,
               history: priorHistory,
-              modelId: existing.modelId,
-              mode: existing.mode === "plan" ? "plan" : "auto",
+              modelId:
+                typeof body.modelId === "string" && body.modelId.trim()
+                  ? body.modelId.trim()
+                  : existing.modelId,
+              mode:
+                body.mode === "plan" || body.mode === "auto"
+                  ? body.mode
+                  : existing.mode === "plan"
+                    ? "plan"
+                    : "auto",
               temperature: typeof body.temperature === "number" ? body.temperature : 0.4,
               savedKeysMap: savedKeysMap2,
               shouldCancel: () => flag2.cancelled,
@@ -290,17 +303,34 @@ export async function POST(req: Request) {
               },
             });
 
+            const persistedSummary =
+              outcome2.status === "completed" && !outcome2.conversational
+                ? polishFinalAnswer(outcome2.summary, {
+                    toolsUsed: outcome2.toolCallCount,
+                    mode:
+                      body.mode === "plan" || body.mode === "auto"
+                        ? body.mode
+                        : existing.mode === "plan"
+                          ? "plan"
+                          : "auto",
+                  })
+                : outcome2.summary;
             await db.insert(agentMessages).values({
               ownerKey: existing.ownerKey,
               sessionId: continueId,
               role: "assistant",
-              content: outcome2.summary ?? "",
+              content: persistedSummary ?? "",
             });
             await db
               .update(agentSessions)
               .set({
                 status: outcome2.status,
-                summary: outcome2.summary,
+                summary: persistedSummary,
+                modelId:
+                  typeof body.modelId === "string" && body.modelId.trim()
+                    ? body.modelId.trim()
+                    : existing.modelId,
+                mode: body.mode === "plan" || body.mode === "auto" ? body.mode : existing.mode,
                 toolCallCount: existing.toolCallCount + outcome2.toolCallCount,
                 updatedAt: new Date(),
               })
@@ -461,17 +491,24 @@ export async function POST(req: Request) {
             },
           });
 
+          const persistedSummary =
+            outcome.status === "completed" && !outcome.conversational
+              ? polishFinalAnswer(outcome.summary, {
+                  toolsUsed: outcome.toolCallCount,
+                  mode: mode === "plan" ? "plan" : "auto",
+                })
+              : outcome.summary;
           await db
             .update(agentSessions)
-            .set({ status: outcome.status, summary: outcome.summary.slice(0, 8000), updatedAt: new Date() })
+            .set({ status: outcome.status, summary: persistedSummary.slice(0, 8000), updatedAt: new Date() })
             .where(eq(agentSessions.id, session.id));
-          if (outcome.summary) {
+          if (persistedSummary) {
             try {
               await db.insert(agentMessages).values({
                 ownerKey: owner.key,
                 sessionId: session.id,
                 role: "assistant",
-                content: outcome.summary.slice(0, 12000),
+                content: persistedSummary.slice(0, 12000),
               });
             } catch {
               // Ignore history write failures.

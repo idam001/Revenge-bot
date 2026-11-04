@@ -74,6 +74,7 @@ export interface AgentOutcome {
   summary: string;
   toolCallCount: number;
   iterations: number;
+  conversational?: boolean;
 }
 
 interface ResolvedEndpoint {
@@ -318,6 +319,48 @@ export function stripReasoningPreamble(input: string): string {
   const last = sentences[sentences.length - 1];
   return last && last.length >= 2 ? last : text;
 }
+/**
+ * The final message must be something a person wants to read: what happened and
+ * what they have now. Models leak their working-out ("I should build…",
+ * "- Canvas-based rendering - Score tracking…", fence skeletons) into it, so
+ * drop those lines instead of showing them as the answer.
+ */
+export function polishFinalAnswer(
+  input: string,
+  context?: { toolsUsed?: number; mode?: "auto" | "plan" }
+): string {
+  const text = (input ?? "").trim();
+  if (!text) return text;
+  const lines = text.split(/\n+/);
+
+  const isNoise = (line: string): boolean => {
+    const l = line.trim();
+    if (!l) return false;
+    if (/^```/.test(l)) return true;                       // fence markers
+    if (/^\{.*"tool"\s*:/.test(l)) return true;               // raw action JSON
+    if (/^(key features|features|plan|steps|todo)\s*:/i.test(l)) return true;
+    if (/^[\-*\u2022]\s+(canvas-based|arrow keys|score tracking|game over|responsive design|nice visual)/i.test(l)) return true; // hallucinated feature-plan bullet
+    // "I should build…", "Let me create…", "I'll now write…"
+    if (/^(let me|i'?ll|i will|i should|i need to|i am going to|i'?m going to|let's think|here's my plan)\b/i.test(l)) return true;
+    return false;
+  };
+
+  const kept = lines.filter((line) => !isNoise(line));
+  const out = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+
+  // If the model produced nothing but working-out, say what actually happened
+  // rather than showing its thought process as if it were the answer.
+  if (out.length < 12) {
+    if (context?.toolsUsed && context.toolsUsed > 0) {
+      return `Done — I ran ${context.toolsUsed} command${context.toolsUsed === 1 ? "" : "s"} in the sandbox. The files are in the workspace; open the file list to inspect them, or tell me what to change.`;
+    }
+    return context?.mode === "plan"
+      ? "Plan only is on, so I didn't create or change any files. Switch to Auto and send the task again when you want me to build and test it."
+      : "I couldn't finish that task, and no completed result is available yet. Try again or tell me what to change.";
+  }
+  return out;
+}
+
 const AGENT_SYSTEM = `You are REVENGE Agent, an autonomous coding agent running inside REVENGE GPT with a real isolated Linux cloud sandbox (Firecracker microVM). You have genuine tools that execute real commands, manipulate real files, and return real output. Never claim an action succeeded without tool output proving it.
 
 WORKSPACE: All project files live under /home/user/workspace. Stay inside it.
@@ -335,7 +378,22 @@ RULES: complete files only, no placeholders; fix real errors from tool output, n
 
 // Deliberately tiny. Small free models will happily repeat a long system
 // prompt back at the user, so the chat prompt says almost nothing.
-const CHAT_SYSTEM = "You are REVENGE, a friendly coding assistant with a real sandbox. Answer the user directly and briefly, in your own words.";
+/** Keep casual replies conversational instead of letting small models ramble. */
+export function conciseChatReply(input: string): string {
+  const text = (input ?? "").replace(/\s+/g, " ").trim();
+  if (text.split(/\s+/).length <= 72) return text;
+  const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [text];
+  let out = "";
+  for (const sentence of sentences) {
+    const next = (out + " " + sentence.trim()).trim();
+    if (next.split(/\s+/).length > 62) break;
+    out = next;
+    if ((out.match(/[.!?](?:\s|$)/g) ?? []).length >= 3) break;
+  }
+  return out || "I can help with that. What would you like to know?";
+}
+
+const CHAT_SYSTEM = "You are REVENGE, a friendly coding assistant with a real sandbox. Answer the user directly in 1–3 short sentences; do not list every capability unless asked, and never narrate private reasoning.";
 
 export function buildChatSystemPrompt(custom?: string): string {
   return custom?.trim() ? `${CHAT_SYSTEM}\n\nPROJECT INSTRUCTIONS:\n${custom.trim()}` : CHAT_SYSTEM;
@@ -595,7 +653,16 @@ export async function runAgentLoop(
   const emit = (type: AgentEvent["type"], extra: Record<string, unknown> = {}) => {
     const clean: Record<string, unknown> = { ...extra };
     if (typeof clean.text === "string") clean.text = sanitizeModelText(clean.text);
-    if (typeof clean.summary === "string") clean.summary = stripReasoningPreamble(sanitizeModelText(clean.summary));
+    if (typeof clean.summary === "string") {
+      const cleaned = sanitizeModelText(clean.summary);
+      clean.summary =
+        type === "agent.completed" && clean.conversational !== true
+          ? polishFinalAnswer(cleaned, {
+              toolsUsed: Number(clean.toolCallCount ?? 0),
+              mode: opts.mode === "plan" ? "plan" : "auto",
+            })
+          : stripReasoningPreamble(cleaned);
+    }
     opts.emit({ type, sessionId: opts.sessionId, timestamp: new Date().toISOString(), ...clean });
   };
 
@@ -624,7 +691,11 @@ export async function runAgentLoop(
     }
     endpoint = next;
     emit("agent.status", {
-      text: `Switching model engine after: ${reason.slice(0, 120)}`,
+      text: /503|502|504|overload|capacity/i.test(reason)
+        ? "This model is busy. Trying another available engine…"
+        : /429|quota|rate limit/i.test(reason)
+          ? "Model limit reached. Switching to another available engine…"
+          : "Switching to another available model engine…",
       providerUsed: next.url,
     });
     return true;
@@ -654,7 +725,6 @@ export async function runAgentLoop(
           temperature,
           maxTokens: 2048,
         });
-        emit("agent.thinking", { text: r.text });
         emit("agent.completed", { summary: r.text, toolCallCount: 0, iterations: 1 });
         return { status: "completed", summary: r.text, toolCallCount: 0, iterations: 1 };
       }
@@ -672,7 +742,6 @@ export async function runAgentLoop(
         extraHeaders: endpoint.extraHeaders,
         onText: (t) => {
           turnProse = (turnProse + t).slice(-4000);
-          emit("agent.thinking", { text: t });
         },
       });
       emit("agent.completed", { summary: r.text, toolCallCount: 0, iterations: 1 });
@@ -701,7 +770,7 @@ export async function runAgentLoop(
             { role: "user", content: opts.task },
           ],
           temperature,
-          maxTokens: 700,
+          maxTokens: 220,
         });
         reply = r.text;
       } else {
@@ -715,18 +784,19 @@ export async function runAgentLoop(
             { role: "user", content: opts.task },
           ],
           temperature,
-          maxTokens: 700,
+          maxTokens: 220,
           stream: true,
           extraHeaders: endpoint.extraHeaders,
-          onText: (t) => emit("agent.thinking", { text: t }),
         });
         reply = r.text;
       }
-      const clean =
-        stripReasoningPreamble(sanitizeModelText(reply)) ||
-        "I'm here — what would you like me to build or run?";
+      const cleaned = stripReasoningPreamble(sanitizeModelText(reply));
+      const asksCapabilities = /\b(what can you (?:do|offer)|what are you able to do|your capabilities)\b/i.test(opts.task);
+      const clean = asksCapabilities
+        ? "I can build and debug apps, write and run code, test changes, explain or refactor a codebase, and help with APIs and automation—all in the sandbox. What are you working on?"
+        : conciseChatReply(cleaned) || "I'm here — what would you like me to build or run?";
       emit("agent.completed", { summary: clean, toolCallCount: 0, iterations: 1, conversational: true });
-      return { status: "completed", summary: clean, toolCallCount: 0, iterations: 1 };
+      return { status: "completed", summary: clean, toolCallCount: 0, iterations: 1, conversational: true };
     } catch (err) {
       // If the chat reply itself fails, fall through to the normal loop so the
       // message is never swallowed.
@@ -787,11 +857,14 @@ export async function runAgentLoop(
         });
         if (r.text) {
           turnProse = r.text.slice(-4000);
-          emit("agent.thinking", { text: r.text });
         }
         if (r.toolCalls.length === 0) {
           finalSummary = r.text;
-          emit("agent.completed", { summary: finalSummary, toolCallCount, iterations: iteration });
+          emit("agent.completed", {
+            summary: finalSummary,
+            toolCallCount,
+            iterations: iteration,
+          });
           return { status: "completed", summary: finalSummary, toolCallCount, iterations: iteration };
         }
         const assistantBlocks: unknown[] = [];
@@ -836,7 +909,6 @@ export async function runAgentLoop(
         maxTokens: 4096,
         stream: true,
         extraHeaders: endpoint.extraHeaders,
-        onText: (t) => emit("agent.thinking", { text: t }),
       });
 
       if (iteration === 1) history.push(...convo);
@@ -863,7 +935,11 @@ export async function runAgentLoop(
       // Structured-action path (keyless models)
       if (/^\s*DONE[.!]?\s*$/i.test(r.text.trim())) {
         finalSummary = "Task completed. " + (finalSummary || "");
-        emit("agent.completed", { summary: finalSummary.trim(), toolCallCount, iterations: iteration });
+        emit("agent.completed", {
+          summary: finalSummary.trim(),
+          toolCallCount,
+          iterations: iteration,
+        });
         return { status: "completed", summary: finalSummary.trim(), toolCallCount, iterations: iteration };
       }
       const actions = parseActionBlocks(r.text);
@@ -909,6 +985,23 @@ export async function runAgentLoop(
         const saysDone =
           /\b(done|finished|complete|completed|all set|everything is (working|ready)|successfully)\b/i.test(text) &&
           !isPreamble;
+        // The model wrote "Let me create the file…" and stopped: that is a plan,
+        // not a finished job. Make it actually act, or wrap up honestly.
+        const planningOnly =
+          /\b(let me|i'?ll|i will|i should|i need to|now i|next,? i|first,? i)\b[^.]{0,80}\b(write|create|build|make|add|implement|run|test|start|begin|set up)\b/i.test(
+            text
+          ) &&
+          !/\b(done|finished|completed|built|created|written|passes|works)\b/i.test(text);
+        if (planningOnly && history.length > 0) {
+          history.push({ role: "assistant", content: text });
+          history.push({
+            role: "user",
+            content:
+              "You described a plan but did not run anything, so nothing happened yet. " +
+              "Either emit the action fence NOW, or if you truly cannot continue, reply with plain text summarising what you had planned.",
+          });
+          continue;
+        }
         // A genuine question back to the user ("what should it do?") is a valid
         // end to the turn — answer, don't nag it into another loop.
         const asksUser =

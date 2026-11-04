@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { ALL_MODELS, getModelById } from "@/lib/revenge-registry";
 import { apiFetch } from "@/lib/api-client";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 /* ------------------------------------------------------------------ */
 
@@ -153,6 +154,7 @@ export function AgentWorkspace({
     Array<{
       id: string;
       role: "user" | "assistant";
+      /** The answer the user reads. */
       text: string;
       status: "streaming" | "done" | "failed";
       events: FeedEntry[];
@@ -209,17 +211,6 @@ export function AgentWorkspace({
 
   /* ------------------------------ SSE ------------------------------ */
 
-  const pushThinking = useCallback((text: string) => {
-    if (!text) return;
-    setFeed((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && last.kind === "thinking") {
-        return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-      }
-      return [...prev, { id: `th_${Date.now()}_${Math.random()}`, kind: "thinking", text, timestamp: new Date().toISOString() }];
-    });
-  }, []);
-
   const upsertTool = useCallback((id: string, patch: Partial<FeedTool> & { tool?: string; command?: string }) => {
     setFeed((prev) => {
       const idx = prev.findIndex((e) => e.id === id);
@@ -260,20 +251,8 @@ export function AgentWorkspace({
   const handleEvent = useCallback(
     (evt: Record<string, unknown>) => {
       const type = String(evt.type ?? "");
-      if (type === "agent.thinking" && typeof evt.text === "string") {
-        pushThinking(evt.text);
-        setTurns((prev) => {
-          if (prev.length === 0) return prev;
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last.role !== "assistant") return prev;
-          next[next.length - 1] = {
-            ...last,
-            text: (last.text + evt.text).slice(-20000),
-            status: "streaming",
-          };
-          return next;
-        });
+      if (type === "agent.thinking") {
+        // Model working-out stays private; the UI shows a neutral progress state.
       } else if (type === "tool.queued" || type === "tool.started") {
         upsertTool(String(evt.executionId ?? ""), {
           tool: String(evt.tool ?? "execute_command"),
@@ -350,7 +329,7 @@ export function AgentWorkspace({
         void refreshSessions();
       }
     },
-    [pushThinking, upsertTool, refreshSessions]
+    [upsertTool, refreshSessions]
   );
 
   const startTask = useCallback(
@@ -867,15 +846,14 @@ export function AgentWorkspace({
                           })}
                         </div>
                       )}
-
-                      {/* The agent's answer, as plain prose */}
+                      {/* The agent answer, rendered as real markdown */}
                       {turn.text ? (
                         <div
-                          className={`text-[14.5px] leading-[1.75] whitespace-pre-wrap break-words ${
+                          className={`agent-answer text-[14.5px] leading-[1.75] break-words ${
                             turn.status === "failed" ? "text-red-200/90" : "text-white/90"
                           }`}
                         >
-                          {turn.text}
+                          <MarkdownRenderer content={turn.text} />
                           {turn.status === "streaming" && (
                             <span className="inline-block w-[2px] h-[15px] ml-0.5 align-middle bg-[#d97757] animate-pulse" />
                           )}
@@ -883,7 +861,7 @@ export function AgentWorkspace({
                       ) : turn.status === "streaming" ? (
                         <div className="flex items-center gap-2 text-[13px] text-white/45">
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          Working in the sandbox…
+                          Thinking through your request…
                         </div>
                       ) : null}
 
@@ -995,11 +973,11 @@ export function AgentWorkspace({
                 value={mode}
                 onChange={(e) => setMode(e.target.value as "auto" | "plan")}
                 disabled={running}
-                title="Agent mode"
+                title={mode === "plan" ? "Plan only: no files are created or commands run" : "Agent mode: can build and run tasks"}
                 className="px-2 h-9 rounded-lg bg-transparent border border-transparent hover:border-white/10 text-[12.5px] text-white/60 focus:outline-none cursor-pointer disabled:opacity-50"
               >
                 <option value="auto" className="bg-[#1d1c1a]">Agent</option>
-                <option value="plan" className="bg-[#1d1c1a]">Plan only</option>
+                <option value="plan" className="bg-[#1d1c1a]">Plan only (no build)</option>
               </select>
               <span className="hidden md:inline text-[11px] text-white/30 ml-1">{capability}</span>
               <div className="ml-auto">
