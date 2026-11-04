@@ -423,9 +423,17 @@ export async function POST(req: Request) {
             });
           }
         } catch (err) {
-          const errMsg =
-            err instanceof Error ? err.message : "Inference pipeline error";
-          send({ type: "error", error: errMsg });
+          const raw = err instanceof Error ? err.message : String(err);
+          console.error("[chat:stream] " + raw);
+          // Whitelist: only surface messages we wrote ourselves. Anything that
+          // looks like SQL, an ORM error, or an internal host/port is replaced
+          // with a neutral message — the real cause is in the server log.
+          const safe =
+            /^(Model|Provider|Upstream|No provider|Image|Video|Generation)[^\n]{0,180}$/.test(raw) &&
+            !/\b(select|insert|update|delete|from|where|params|relation|column)\b/i.test(raw)
+              ? raw
+              : "The assistant could not finish that reply. Please try again.";
+          send({ type: "error", error: safe, retryable: true });
         } finally {
           controller.close();
         }
