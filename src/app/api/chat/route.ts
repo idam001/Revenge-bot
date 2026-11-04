@@ -12,7 +12,9 @@ import {
   type SavedProviderConfig,
 } from "@/lib/revenge-engine";
 import { gatherWebGrounding } from "@/lib/web-grounding";
-import { asc, eq } from "drizzle-orm";
+import { getOwner } from "@/lib/auth";
+import { clientKey, rateLimit } from "@/lib/rate-limit";
+import { and, asc, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -66,6 +68,19 @@ export async function POST(req: Request) {
   try {
     await ensureDbSchema();
 
+    // Identity is resolved server-side; the client cannot claim another owner.
+    const owner = await getOwner({ create: true });
+    if (!owner) {
+      return Response.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
+    }
+    const rl = rateLimit(`chat:${owner.key}:${clientKey(req)}`, 40, 60_000);
+    if (!rl.ok) {
+      return Response.json(
+        { error: "Rate limit reached — wait a moment and try again.", code: "RATE_LIMITED" },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } }
+      );
+    }
+
     const body = (await req.json()) as {
       conversationId?: string | null;
       message: string;
@@ -100,7 +115,10 @@ export async function POST(req: Request) {
     // Load provider keys & enabled memories in parallel
     const [keyRows, memoryRows] = await Promise.all([
       db.select().from(providerKeys),
-      db.select().from(memories).where(eq(memories.enabled, true)),
+      db
+        .select()
+        .from(memories)
+        .where(and(eq(memories.enabled, true), eq(memories.ownerKey, owner.key))),
     ]);
 
     const savedKeysMap: Record<string, SavedProviderConfig> = {};
@@ -161,6 +179,7 @@ export async function POST(req: Request) {
         const [created] = await db
           .insert(conversations)
           .values({
+            ownerKey: owner.key,
             title: generateSmartTitle(
               userText || (currentImages.length > 0 ? "Image analysis" : attachments[0]?.name || "File Analysis")
             ),
@@ -174,12 +193,13 @@ export async function POST(req: Request) {
         const [existingConv] = await db
           .select()
           .from(conversations)
-          .where(eq(conversations.id, activeConvId));
+          .where(and(eq(conversations.id, activeConvId), eq(conversations.ownerKey, owner.key)));
 
         if (!existingConv) {
           const [created] = await db
             .insert(conversations)
             .values({
+              ownerKey: owner.key,
               title: generateSmartTitle(userText),
               modelId,
               personaId,
@@ -202,14 +222,14 @@ export async function POST(req: Request) {
             const [updatedConv] = await db
               .update(conversations)
               .set({ title: newTitle, modelId, personaId, updatedAt: new Date() })
-              .where(eq(conversations.id, activeConvId))
+              .where(and(eq(conversations.id, activeConvId), eq(conversations.ownerKey, owner.key)))
               .returning();
             newlyCreatedConv = updatedConv;
           } else {
             await db
               .update(conversations)
               .set({ modelId, personaId, updatedAt: new Date() })
-              .where(eq(conversations.id, activeConvId));
+              .where(and(eq(conversations.id, activeConvId), eq(conversations.ownerKey, owner.key)));
           }
 
           historyMessages = prevMsgs.map((m) => {
@@ -234,6 +254,7 @@ export async function POST(req: Request) {
         const [insertedUser] = await db
           .insert(messages)
           .values({
+            ownerKey: owner.key,
             conversationId: activeConvId,
             role: "user",
             content:
@@ -376,6 +397,7 @@ export async function POST(req: Request) {
               const [inserted] = await db
                 .insert(messages)
                 .values({
+                  ownerKey: owner.key,
                   conversationId: activeConvId,
                   role: "assistant",
                   content: result.content,

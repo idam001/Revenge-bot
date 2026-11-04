@@ -80,6 +80,7 @@ import {
   UniversalVaultModal,
   type ProviderStatusItem,
 } from "./UniversalVaultModal";
+import { AccountMenu } from "./AccountMenu";
 import { ModelPickerModal } from "./ModelPickerModal";
 import { PromptArsenalModal } from "./PromptArsenalModal";
 import { SparkIcon } from "./SparkIcon";
@@ -163,6 +164,10 @@ type VaultTab = "vault" | "keyless" | "project" | "engine" | "memory";
 
 const DEFAULT_SETTINGS: AppSettingsRow = {
   id: "default",
+  ownerKey: "legacy:public",
+  theme: "dark",
+  personalInstructions: "",
+  memoryEnabled: true,
   defaultModelId: "revenge-omega-x",
   defaultPersonaId: "unchained",
   customSystemPrompt: "",
@@ -1858,23 +1863,9 @@ export function RevengeStudio() {
       <div className="p-2 border-t border-[var(--border-subtle)] shrink-0 safe-bottom">
         {sidebarExpanded ? (
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => openVault("engine")}
-              className="flex-1 min-w-0 flex items-center gap-2.5 px-2 h-12 rounded-lg hover:bg-[var(--bg-elevated)] cursor-pointer text-left"
-            >
-              <span className="w-8 h-8 rounded-full bg-[var(--text-primary)] text-[var(--bg-main)] flex items-center justify-center text-[12px] font-semibold shrink-0">
-                IE
-              </span>
-              <span className="min-w-0">
-                <span className="block text-[13.5px] font-medium text-[var(--text-primary)] truncate">
-                  {CREATOR_NAME}
-                </span>
-                <span className="block text-[11.5px] text-[var(--text-muted)]">
-                  Free plan · Settings
-                </span>
-              </span>
-            </button>
+            <div className="flex-1 min-w-0">
+              <AccountMenu variant="sidebar" />
+            </div>
             <button
               type="button"
               aria-label="Toggle theme"
@@ -1891,14 +1882,7 @@ export function RevengeStudio() {
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            aria-label="Settings"
-            onClick={() => openVault("engine")}
-            className="mx-auto flex w-9 h-9 rounded-full bg-[var(--text-primary)] text-[var(--bg-main)] items-center justify-center text-[12px] font-semibold cursor-pointer"
-          >
-            IE
-          </button>
+          <AccountMenu variant="sidebar" />
         )}
       </div>
     </aside>

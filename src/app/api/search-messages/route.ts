@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { conversations, messages } from "@/db/schema";
-import { desc, ilike, eq } from "drizzle-orm";
+import { getOwner } from "@/lib/auth";
+import { and, desc, ilike, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
     await ensureDbSchema();
+    const owner = await getOwner({ create: true });
+    if (!owner) return NextResponse.json({ chats: [], hits: [] });
     const q = (new URL(req.url).searchParams.get("q") || "").trim();
     if (q.length < 2) {
       return NextResponse.json({ chats: [], hits: [] });
@@ -22,7 +25,7 @@ export async function GET(req: Request) {
           updatedAt: conversations.updatedAt,
         })
         .from(conversations)
-        .where(ilike(conversations.title, pattern))
+        .where(and(eq(conversations.ownerKey, owner.key), ilike(conversations.title, pattern)))
         .orderBy(desc(conversations.updatedAt))
         .limit(6),
       db
@@ -36,7 +39,7 @@ export async function GET(req: Request) {
         })
         .from(messages)
         .innerJoin(conversations, eq(messages.conversationId, conversations.id))
-        .where(ilike(messages.content, pattern))
+        .where(and(eq(conversations.ownerKey, owner.key), ilike(messages.content, pattern)))
         .orderBy(desc(messages.createdAt))
         .limit(20),
     ]);

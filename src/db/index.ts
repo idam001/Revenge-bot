@@ -131,6 +131,47 @@ export async function ensureDbSchema(): Promise<void> {
         ALTER TABLE "messages" ADD COLUMN IF NOT EXISTS "videoUrl" text;
         ALTER TABLE "conversations" ADD COLUMN IF NOT EXISTS "shareToken" text;
         ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "featureFlags" jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+        -- Multi-user ownership (added in the auth upgrade).
+        -- ownerKey is user:<uuid>, guest:<token> or legacy:public.
+        -- Existing rows are preserved and tagged as legacy public data.
+        ALTER TABLE "conversations" ADD COLUMN IF NOT EXISTS "ownerKey" text NOT NULL DEFAULT 'legacy:public';
+        ALTER TABLE "memories"      ADD COLUMN IF NOT EXISTS "ownerKey" text NOT NULL DEFAULT 'legacy:public';
+        ALTER TABLE "agent_sessions" ADD COLUMN IF NOT EXISTS "ownerKey" text NOT NULL DEFAULT 'legacy:public';
+        ALTER TABLE "app_settings"   ADD COLUMN IF NOT EXISTS "ownerKey" text NOT NULL DEFAULT 'legacy:public';
+        ALTER TABLE "messages"       ADD COLUMN IF NOT EXISTS "ownerKey" text NOT NULL DEFAULT 'legacy:public';
+        ALTER TABLE "provider_keys"  ADD COLUMN IF NOT EXISTS "ownerKey" text NOT NULL DEFAULT 'legacy:public';
+        ALTER TABLE "agent_executions" ADD COLUMN IF NOT EXISTS "ownerKey" text NOT NULL DEFAULT 'legacy:public';
+
+        -- Per-user personalisation columns
+        ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "theme" text NOT NULL DEFAULT 'dark';
+        ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "personalInstructions" text NOT NULL DEFAULT '';
+        ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "memoryEnabled" boolean NOT NULL DEFAULT true;
+
+        -- Messages inherit ownership from their conversation
+        UPDATE "messages" m
+           SET "ownerKey" = c."ownerKey"
+          FROM "conversations" c
+         WHERE m."conversationId" = c."id"
+           AND m."ownerKey" = 'legacy:public'
+           AND c."ownerKey" <> 'legacy:public';
+
+        CREATE INDEX IF NOT EXISTS "conversations_owner_idx" ON "conversations" ("ownerKey", "updatedAt" DESC);
+        CREATE INDEX IF NOT EXISTS "messages_conv_idx" ON "messages" ("conversationId", "createdAt");
+        CREATE INDEX IF NOT EXISTS "messages_owner_idx" ON "messages" ("ownerKey");
+        CREATE INDEX IF NOT EXISTS "memories_owner_idx" ON "memories" ("ownerKey");
+        CREATE INDEX IF NOT EXISTS "provider_keys_owner_idx" ON "provider_keys" ("ownerKey");
+
+        -- Guest→account merge bookkeeping (idempotent, safe to re-run)
+        CREATE TABLE IF NOT EXISTS "guest_merges" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          "userId" uuid NOT NULL,
+          "guestToken" text NOT NULL,
+          "conversationsMoved" integer NOT NULL DEFAULT 0,
+          "memoriesMoved" integer NOT NULL DEFAULT 0,
+          "createdAt" timestamp NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS "guest_merges_user_idx" ON "guest_merges" ("userId");
       `);
     })().catch((err) => {
       globalForDb.__revengeSchemaReady = undefined;

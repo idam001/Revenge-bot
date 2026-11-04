@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { db, ensureDbSchema } from "@/db";
+import { getOwner } from "@/lib/auth";
 import { agentExecutions, agentSessions, memories, providerKeys } from "@/db/schema";
 import { asc, desc, eq } from "drizzle-orm";
 import {
@@ -27,6 +28,11 @@ function sseEncode(payload: AgentEvent): Uint8Array {
 async function loadSession(sessionId: string, token?: string) {
   const [session] = await db.select().from(agentSessions).where(eq(agentSessions.id, sessionId));
   if (!session) return null;
+  // Session capability token must match, AND the request must come from the
+  // same owner (account or guest) that created the session.
+  const owner = await getOwner();
+  if (!owner) return "forbidden" as const;
+  if (session.ownerKey !== owner.key) return "forbidden" as const;
   if (token && session.ownerToken !== token) return "forbidden" as const;
   return session;
 }
@@ -165,6 +171,10 @@ export async function POST(req: Request) {
       );
     }
 
+    const owner = await getOwner({ create: true });
+    if (!owner) {
+      return Response.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
+    }
     const modelId = body.modelId || "revenge-omega-x";
     const mode = body.mode === "plan" ? "plan" : "auto";
     const ownerToken = crypto.randomUUID();
@@ -173,6 +183,7 @@ export async function POST(req: Request) {
     const [session] = await db
       .insert(agentSessions)
       .values({
+        ownerKey: owner.key,
         conversationId: body.conversationId || null,
         title,
         modelId,
@@ -183,8 +194,8 @@ export async function POST(req: Request) {
       .returning();
 
     const [keyRows, memoryRows] = await Promise.all([
-      db.select().from(providerKeys),
-      db.select().from(memories),
+      db.select().from(providerKeys).where(eq(providerKeys.ownerKey, owner.key)),
+      db.select().from(memories).where(eq(memories.ownerKey, owner.key)),
     ]);
     void memoryRows;
     const savedKeysMap: Record<string, SavedProviderConfig> = {};

@@ -1,27 +1,32 @@
 import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { sql } from "drizzle-orm";
+import { getOwner } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
     await ensureDbSchema();
+    const owner = await getOwner({ create: true });
+    if (!owner) {
+      return NextResponse.json({ chats: 0, messages: 0, images: 0, videos: 0, searches: 0, avgSpeed: 0, topModels: [] });
+    }
     const result = await db.execute(sql`
       SELECT
-        (SELECT count(*) FROM conversations)::int AS chats,
-        (SELECT count(*) FROM messages)::int AS messages,
-        (SELECT count(*) FROM messages WHERE "imageUrl" IS NOT NULL)::int AS images,
-        (SELECT count(*) FROM messages WHERE "videoUrl" IS NOT NULL)::int AS videos,
-        (SELECT count(*) FROM messages WHERE "webSources" IS NOT NULL)::int AS searches,
-        COALESCE((SELECT round(avg("tokensPerSec"))::int FROM messages WHERE "tokensPerSec" > 0), 0) AS avg_speed
+        (SELECT count(*) FROM conversations WHERE "ownerKey" = ${owner.key})::int AS chats,
+        (SELECT count(*) FROM messages WHERE "ownerKey" = ${owner.key})::int AS messages,
+        (SELECT count(*) FROM messages WHERE "ownerKey" = ${owner.key} AND "imageUrl" IS NOT NULL)::int AS images,
+        (SELECT count(*) FROM messages WHERE "ownerKey" = ${owner.key} AND "videoUrl" IS NOT NULL)::int AS videos,
+        (SELECT count(*) FROM messages WHERE "ownerKey" = ${owner.key} AND "webSources" IS NOT NULL)::int AS searches,
+        COALESCE((SELECT round(avg("tokensPerSec"))::int FROM messages WHERE "ownerKey" = ${owner.key} AND "tokensPerSec" > 0), 0) AS avg_speed
     `);
     const row = (result.rows?.[0] ?? {}) as Record<string, number>;
 
     const top = await db.execute(sql`
       SELECT "modelId", count(*)::int AS n
       FROM messages
-      WHERE role = 'assistant' AND "modelId" IS NOT NULL
+      WHERE role = 'assistant' AND "modelId" IS NOT NULL AND "ownerKey" = ${owner.key}
       GROUP BY "modelId" ORDER BY n DESC LIMIT 5
     `);
 

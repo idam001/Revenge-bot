@@ -24,6 +24,7 @@ export interface AttachmentItem {
 
 export const conversations = pgTable("conversations", {
   id: uuid("id").defaultRandom().primaryKey(),
+  ownerKey: text("ownerKey").notNull().default("legacy:public"),
   title: text("title").notNull().default("New Revenge Session"),
   modelId: text("modelId").notNull().default("revenge-omega-x"),
   personaId: text("personaId").notNull().default("unchained"),
@@ -37,6 +38,7 @@ export const conversations = pgTable("conversations", {
 
 export const messages = pgTable("messages", {
   id: uuid("id").defaultRandom().primaryKey(),
+  ownerKey: text("ownerKey").notNull().default("legacy:public"),
   conversationId: uuid("conversationId")
     .notNull()
     .references(() => conversations.id, { onDelete: "cascade" }),
@@ -58,6 +60,7 @@ export const messages = pgTable("messages", {
 
 export const providerKeys = pgTable("provider_keys", {
   id: uuid("id").defaultRandom().primaryKey(),
+  ownerKey: text("ownerKey").notNull().default("legacy:public"),
   providerId: text("providerId").notNull().unique(),
   apiKey: text("apiKey").notNull(),
   baseUrl: text("baseUrl"),
@@ -69,6 +72,7 @@ export const providerKeys = pgTable("provider_keys", {
 
 export const memories = pgTable("memories", {
   id: uuid("id").defaultRandom().primaryKey(),
+  ownerKey: text("ownerKey").notNull().default("legacy:public"),
   content: text("content").notNull(),
   category: text("category").notNull().default("preference"),
   enabled: boolean("enabled").notNull().default(true),
@@ -77,6 +81,10 @@ export const memories = pgTable("memories", {
 
 export const appSettings = pgTable("app_settings", {
   id: text("id").primaryKey().default("default"),
+  ownerKey: text("ownerKey").notNull().default("legacy:public"),
+  theme: text("theme").notNull().default("dark"),
+  personalInstructions: text("personalInstructions").notNull().default(""),
+  memoryEnabled: boolean("memoryEnabled").notNull().default(true),
   defaultModelId: text("defaultModelId").notNull().default("revenge-omega-x"),
   defaultPersonaId: text("defaultPersonaId").notNull().default("unchained"),
   customSystemPrompt: text("customSystemPrompt").notNull().default(""),
@@ -95,6 +103,7 @@ export const appSettings = pgTable("app_settings", {
 
 export const agentSessions = pgTable("agent_sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
+  ownerKey: text("ownerKey").notNull().default("legacy:public"),
   conversationId: uuid("conversationId").references(() => conversations.id, {
     onDelete: "set null",
   }),
@@ -112,6 +121,7 @@ export const agentSessions = pgTable("agent_sessions", {
 
 export const agentExecutions = pgTable("agent_executions", {
   id: uuid("id").defaultRandom().primaryKey(),
+  ownerKey: text("ownerKey").notNull().default("legacy:public"),
   sessionId: uuid("sessionId")
     .notNull()
     .references(() => agentSessions.id, { onDelete: "cascade" }),
@@ -135,3 +145,15 @@ export type MemoryRow = typeof memories.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type AgentSessionRow = typeof agentSessions.$inferSelect;
 export type AgentExecutionRow = typeof agentExecutions.$inferSelect;
+
+/** Guest→account merge ledger. One row per successful merge attempt. */
+export const guestMerges = pgTable("guest_merges", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("userId").notNull(),
+  guestToken: text("guestToken").notNull(),
+  conversationsMoved: integer("conversationsMoved").notNull().default(0),
+  memoriesMoved: integer("memoriesMoved").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type GuestMergeRow = typeof guestMerges.$inferSelect;

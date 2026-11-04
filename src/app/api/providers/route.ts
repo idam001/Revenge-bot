@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { providerKeys } from "@/db/schema";
 import { CLOUD_PROVIDERS } from "@/lib/revenge-registry";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { getOwner } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,10 @@ function hasServerEnvKey(providerId: string): boolean {
 export async function GET() {
   try {
     await ensureDbSchema();
-    const rows = await db.select().from(providerKeys);
+    const owner = await getOwner({ create: true });
+    const rows = owner
+      ? await db.select().from(providerKeys).where(eq(providerKeys.ownerKey, owner.key))
+      : [];
     const map = new Map(rows.map((r) => [r.providerId, r]));
 
     const providers = CLOUD_PROVIDERS.map((def) => {
@@ -63,6 +67,10 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     await ensureDbSchema();
+    const owner = await getOwner({ create: true });
+    if (!owner) {
+      return NextResponse.json({ error: "Session unavailable", code: "NO_SESSION" }, { status: 401 });
+    }
     const body = (await req.json()) as {
       action: "save" | "delete" | "test" | "testKeyless";
       providerId?: string;
@@ -121,14 +129,14 @@ export async function POST(req: Request) {
     }
 
     if (body.action === "delete") {
-      await db.delete(providerKeys).where(eq(providerKeys.providerId, providerId));
+      await db.delete(providerKeys).where(and(eq(providerKeys.providerId, providerId), eq(providerKeys.ownerKey, owner.key)));
       return NextResponse.json({ ok: true });
     }
 
     const [existing] = await db
       .select()
       .from(providerKeys)
-      .where(eq(providerKeys.providerId, providerId));
+      .where(and(eq(providerKeys.providerId, providerId), eq(providerKeys.ownerKey, owner.key)));
 
     const effectiveKey =
       body.apiKey && !body.apiKey.includes("••••")
@@ -156,7 +164,7 @@ export async function POST(req: Request) {
             enabled: typeof body.enabled === "boolean" ? body.enabled : existing.enabled,
             updatedAt: new Date(),
           })
-          .where(eq(providerKeys.providerId, providerId));
+          .where(and(eq(providerKeys.providerId, providerId), eq(providerKeys.ownerKey, owner.key)));
       } else {
         await db.insert(providerKeys).values({
           providerId,
@@ -236,7 +244,7 @@ export async function POST(req: Request) {
           await db
             .update(providerKeys)
             .set({ lastVerifiedAt: new Date() })
-            .where(eq(providerKeys.providerId, providerId));
+            .where(and(eq(providerKeys.providerId, providerId), eq(providerKeys.ownerKey, owner.key)));
         }
 
         return NextResponse.json({

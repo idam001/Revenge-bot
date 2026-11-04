@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { db, ensureDbSchema } from "@/db";
 import { conversations, messages } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { getOwner } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +14,14 @@ export async function POST(req: Request) {
     if (!body.conversationId) {
       return NextResponse.json({ error: "conversationId required" }, { status: 400 });
     }
+    const owner = await getOwner();
+    if (!owner) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
     const [conv] = await db
       .select()
       .from(conversations)
-      .where(eq(conversations.id, body.conversationId));
+      .where(and(eq(conversations.id, body.conversationId), eq(conversations.ownerKey, owner.key)));
     if (!conv) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }

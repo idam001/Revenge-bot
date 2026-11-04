@@ -1,9 +1,21 @@
 import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
 import { conversations, messages } from "@/db/schema";
+import { getOwner } from "@/lib/auth";
 import { asc, eq, gte, and } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
+
+/** Load a conversation only if the caller owns it. Returns null otherwise. */
+async function ownedConversation(id: string) {
+  const owner = await getOwner();
+  if (!owner) return { owner: null, conv: null as null | typeof conversations.$inferSelect };
+  const [conv] = await db
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.id, id), eq(conversations.ownerKey, owner.key)));
+  return { owner, conv: conv ?? null };
+}
 
 export async function GET(
   _req: Request,
@@ -13,12 +25,9 @@ export async function GET(
     await ensureDbSchema();
     const { id } = await context.params;
 
-    const [conv] = await db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.id, id));
-
+    const { conv } = await ownedConversation(id);
     if (!conv) {
+      // 404 rather than 403 so ids can't be probed
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
@@ -45,6 +54,10 @@ export async function PATCH(
   try {
     await ensureDbSchema();
     const { id } = await context.params;
+    const { conv: existing } = await ownedConversation(id);
+    if (!existing) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
     const body = (await req.json()) as {
       title?: string;
       pinned?: boolean;
@@ -69,7 +82,7 @@ export async function PATCH(
     const [updated] = await db
       .update(conversations)
       .set(updates)
-      .where(eq(conversations.id, id))
+      .where(and(eq(conversations.id, id), eq(conversations.ownerKey, existing.ownerKey)))
       .returning();
 
     return NextResponse.json({ conversation: updated });
@@ -86,6 +99,10 @@ export async function POST(
   try {
     await ensureDbSchema();
     const { id } = await context.params;
+    const { owner, conv: owned } = await ownedConversation(id);
+    if (!owned || !owner) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
     const body = (await req.json()) as {
       action: "truncateFrom" | "fork" | "toggleBookmark";
       messageId?: string;
@@ -95,7 +112,7 @@ export async function POST(
       const [msg] = await db
         .select()
         .from(messages)
-        .where(eq(messages.id, body.messageId));
+        .where(and(eq(messages.id, body.messageId), eq(messages.conversationId, id)));
       if (!msg) {
         return NextResponse.json({ error: "Message not found" }, { status: 404 });
       }
@@ -111,7 +128,7 @@ export async function POST(
       const [target] = await db
         .select()
         .from(messages)
-        .where(eq(messages.id, body.messageId));
+        .where(and(eq(messages.id, body.messageId), eq(messages.conversationId, id)));
       if (target) {
         await db
           .delete(messages)
@@ -148,6 +165,7 @@ export async function POST(
       const [forkedConv] = await db
         .insert(conversations)
         .values({
+          ownerKey: owner.key,
           title: `${orig.title} (Fork)`,
           modelId: orig.modelId,
           personaId: orig.personaId,
@@ -159,6 +177,7 @@ export async function POST(
       if (subset.length > 0) {
         await db.insert(messages).values(
           subset.map((m) => ({
+            ownerKey: owner.key,
             conversationId: forkedConv.id,
             role: m.role,
             content: m.content,
@@ -193,7 +212,13 @@ export async function DELETE(
   try {
     await ensureDbSchema();
     const { id } = await context.params;
-    await db.delete(conversations).where(eq(conversations.id, id));
+    const { owner, conv } = await ownedConversation(id);
+    if (!conv || !owner) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
+    await db
+      .delete(conversations)
+      .where(and(eq(conversations.id, id), eq(conversations.ownerKey, owner.key)));
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to delete";
