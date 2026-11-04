@@ -14,8 +14,8 @@ export async function GET(
   return new Response(new Uint8Array(found.data), {
     headers: {
       "Content-Type": found.contentType,
-      "Cache-Control": "public, max-age=86400, immutable",
-      "Accept-Ranges": "bytes",
+      "Content-Length": String(found.data.length),
+      "Cache-Control": "public, max-age=31536000, immutable",
     },
   });
 }

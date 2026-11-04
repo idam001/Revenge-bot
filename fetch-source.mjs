@@ -3,7 +3,7 @@
 import { writeFileSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 
-const url = "https://fszewuewdsjloiwwggvy.supabase.co/storage/v1/object/public/deploy/source-research-workspace-20261104.tar.gz";
+const url = "https://fszewuewdsjloiwwggvy.supabase.co/storage/v1/object/public/deploy/source-durable-media-fix-20261104.tar.gz";
 const res = await fetch(url);
 if (!res.ok) throw new Error("source download failed " + res.status);
 writeFileSync("/tmp/src.tar.gz", Buffer.from(await res.arrayBuffer()));

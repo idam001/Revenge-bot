@@ -474,6 +474,41 @@ function CodeBlockCard({
   );
 }
 
+function MarkdownImage({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="my-4 max-w-xl rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-8 text-center">
+        <div className="text-sm font-medium text-[var(--text-primary)]">Image unavailable</div>
+        <div className="mt-1 text-xs text-[var(--text-muted)]">The image could not be retrieved. Try generating it again.</div>
+      </div>
+    );
+  }
+  return (
+    <span className="block my-4 rounded-2xl overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-elevated)] shadow-lg max-w-xl">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        className="w-full h-auto object-cover min-h-[220px]"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+      <span className="flex items-center justify-between px-3.5 py-2 text-xs text-[var(--text-secondary)] border-t border-[var(--border-subtle)]">
+        <span className="truncate">{alt}</span>
+        <a
+          href={src}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[var(--accent)] font-medium ml-3 shrink-0 hover:underline"
+        >
+          Open full size ↗
+        </a>
+      </span>
+    </span>
+  );
+}
+
 export function MarkdownRenderer({
   content,
   serifProse = false,
@@ -530,28 +565,7 @@ export function MarkdownRenderer({
           img: ({ src, alt }) => {
             const imgSrc = typeof src === "string" ? src : "";
             if (!imgSrc) return null;
-            return (
-              <span className="block my-4 rounded-2xl overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-elevated)] shadow-lg max-w-xl">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={imgSrc}
-                  alt={alt || "Generated image"}
-                  className="w-full h-auto object-cover min-h-[220px]"
-                  loading="lazy"
-                />
-                <span className="flex items-center justify-between px-3.5 py-2 text-xs text-[var(--text-secondary)] border-t border-[var(--border-subtle)]">
-                  <span className="truncate">{alt || "Generated image"}</span>
-                  <a
-                    href={imgSrc}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[var(--accent)] font-medium ml-3 shrink-0 hover:underline"
-                  >
-                    Open full size ↗
-                  </a>
-                </span>
-              </span>
-            );
+            return <MarkdownImage src={imgSrc} alt={alt || "Generated image"} />;
           },
           table: ({ children }) => (
             <div className="my-4 overflow-x-auto rounded-xl border border-[var(--border-subtle)]">
