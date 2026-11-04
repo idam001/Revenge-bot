@@ -54,16 +54,27 @@ export async function saveMediaBuffer(
   return `/api/media/${filename}`;
 }
 
+async function readLocalMedia(
+  filename: string,
+  ext: MediaExtension
+): Promise<{ data: Buffer; contentType: string } | null> {
+  try {
+    const data = await fs.readFile(path.join(MEDIA_DIR, filename));
+    return { data, contentType: contentTypeFor(ext) };
+  } catch {
+    return null;
+  }
+}
+
 export async function readMediaFile(
   filename: string
 ): Promise<{ data: Buffer; contentType: string } | null> {
   const safe = path.basename(filename);
   const match = safe.match(/^([0-9a-f-]{36})\.(png|jpg|webp|mp4)$/i);
-  if (!match) return null;
-
-  const [, id, extension] = match;
-  const ext = extension.toLowerCase() as MediaExtension;
-  if (ext !== "mp4") {
+  if (match) {
+    const [, id, extension] = match;
+    const ext = extension.toLowerCase() as MediaExtension;
+    if (ext === "mp4") return readLocalMedia(safe, ext);
     await ensureDbSchema();
     const result = await pool.query<{ data: Buffer; contentType: string }>(
       `SELECT "data", "contentType" FROM "generated_media" WHERE "id" = $1 LIMIT 1`,
@@ -73,10 +84,8 @@ export async function readMediaFile(
     return asset ? { data: asset.data, contentType: asset.contentType } : null;
   }
 
-  try {
-    const data = await fs.readFile(path.join(MEDIA_DIR, safe));
-    return { data, contentType: contentTypeFor(ext) };
-  } catch {
-    return null;
-  }
+  // Read URLs emitted by the pre-durable-media version during warm rollouts.
+  const legacy = safe.match(/^\d{10,}-[0-9a-f]{12}\.(png|jpg|webp|mp4)$/i);
+  if (!legacy) return null;
+  return readLocalMedia(safe, legacy[1].toLowerCase() as MediaExtension);
 }
