@@ -81,17 +81,6 @@ export async function ensureDbSchema(): Promise<void> {
           "createdAt" timestamp NOT NULL DEFAULT now()
         );
 
-        -- Generated images must outlive a particular serverless function's /tmp.
-        -- Keep immutable media bytes in Postgres so a later /api/media request,
-        -- refresh, or another Lambda instance can retrieve the same image.
-        CREATE TABLE IF NOT EXISTS "generated_media" (
-          "id" text PRIMARY KEY,
-          "data" bytea NOT NULL,
-          "contentType" text NOT NULL,
-          "createdAt" timestamp NOT NULL DEFAULT now()
-        );
-        CREATE INDEX IF NOT EXISTS "generated_media_created_idx" ON "generated_media" ("createdAt");
-
         CREATE TABLE IF NOT EXISTS "agent_sessions" (
           "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           "conversationId" uuid REFERENCES "conversations"("id") ON DELETE SET NULL,

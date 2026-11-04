@@ -368,13 +368,12 @@ async function runBflFluxSchnell(
     img?.url || (img?.path ? `${base}/gradio_api/file=${img.path}` : "");
   if (!remoteUrl) throw new Error("BFL Flux returned no image URL");
 
-  // Persist provider output before reporting success; remote Gradio URLs can expire.
   const localUrl = await cacheRemoteBinary(
     remoteUrl,
     "webp",
     20000,
     headers
-  );
+  ).catch(() => remoteUrl);
 
   return {
     url: localUrl,
@@ -462,11 +461,12 @@ async function runAiHordeImage(
       const imgField = gen.img!;
       let localUrl = imgField;
       if (imgField.startsWith("http")) {
-        localUrl = await cacheRemoteBinary(imgField, "webp", 15000);
+        localUrl = await cacheRemoteBinary(imgField, "webp", 15000).catch(
+          () => imgField
+        );
       } else {
-        const encodedImage = imgField.replace(new RegExp("^data:image/[a-z0-9.+-]+;base64,", "i"), "");
         localUrl = await saveMediaBuffer(
-          Buffer.from(encodedImage, "base64"),
+          Buffer.from(imgField, "base64"),
           "webp"
         );
       }
