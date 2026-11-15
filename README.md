@@ -55,6 +55,8 @@ npm run dev                  # http://localhost:3000
 | `E2B_API_KEY` | ➖ | Enables the sandboxed agent workspace. |
 | `HF_TOKEN` | ➖ | Enables Hugging Face media models. |
 | `AIHORDE_API_KEY` | ➖ | Enables the AI Horde fallback. |
+| `NABEES_API_KEY` | ➖ | Server-side credential for the REVENGE Tools upstream proxy. Tool invocation returns a provider configuration error when omitted. |
+| `EMAILOSINT_API_KEY` | ➖ | Server-side Email OSINT credential; plan access is controlled by EmailOSINT. Never expose it with a `NEXT_PUBLIC_` prefix. |
 
 Provider keys can also be added at runtime from the in-app **Universal API Key Vault**.
 
