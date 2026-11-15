@@ -15,6 +15,8 @@ import {
   User as UserIcon,
   ChevronDown,
   ShieldCheck,
+  Code2,
+  Wrench,
   Loader2,
 } from "lucide-react";
 import {
@@ -59,7 +61,8 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
   }, [onAuthChange]);
 
   useEffect(() => {
-    load();
+    const timer = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
   // Merge any guest work into the account once, right after sign-in.
@@ -283,6 +286,22 @@ export function AccountMenu({ variant = "sidebar", onAuthChange }: Props) {
             className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-[var(--text-primary)] transition hover:bg-[var(--bg-elevated-2)]"
           >
             <ShieldCheck className="h-4 w-4" /> Privacy
+          </Link>
+          <Link
+            href="/tools"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-[var(--text-primary)] transition hover:bg-[var(--bg-elevated-2)]"
+          >
+            <Wrench className="h-4 w-4" /> REVENGE tools
+          </Link>
+          <Link
+            href="/developers"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-[var(--text-primary)] transition hover:bg-[var(--bg-elevated-2)]"
+          >
+            <Code2 className="h-4 w-4" /> Developer Portal
           </Link>
           <div className="h-px bg-[var(--border-subtle)]" />
           <button

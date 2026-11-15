@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowDown,
   ArrowDownToLine,
   ArrowUp,
+  Activity,
   Bookmark,
   BookOpen,
   Bot,
@@ -24,6 +26,7 @@ import {
   FolderKanban,
   Ghost,
   Keyboard,
+  LayoutGrid,
   Link2,
   GitBranch,
   Globe,
@@ -72,6 +75,7 @@ import {
   MarkdownRenderer,
   extractArtifactsFromMarkdown,
   isPreviewableArtifact,
+  GeneratedImagePreview,
   type CanvasArtifactPayload,
 } from "./MarkdownRenderer";
 import { ArtifactCanvasDrawer } from "./ArtifactCanvasDrawer";
@@ -87,6 +91,7 @@ import { SparkIcon } from "./SparkIcon";
 import { FeatureLab } from "./FeatureLab";
 import { AgentWorkspace } from "./AgentWorkspace";
 import { ResearchWorkspace } from "./ResearchWorkspace";
+import { AppsWorkspace } from "./AppsWorkspace";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { DEFAULT_FLAGS } from "@/lib/feature-catalog";
 
@@ -162,7 +167,7 @@ interface MinimalSpeechRecognition {
   stop: () => void;
 }
 
-type VaultTab = "vault" | "keyless" | "project" | "engine" | "memory";
+type VaultTab = "vault" | "keyless" | "project" | "engine" | "memory" | "tools";
 
 const DEFAULT_SETTINGS: AppSettingsRow = {
   id: "default",
@@ -353,13 +358,16 @@ function displayNameFor(user: { name?: string | null; email?: string | null } | 
   return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
-export function RevengeStudio() {
+export function RevengeStudio({ initialAppsOpen = false, initialApp = null }: { initialAppsOpen?: boolean; initialApp?: string | null }) {
+  const router = useRouter();
   const [theme, setTheme] = useState<"claude-dark" | "claude-light">(
     "claude-dark"
   );
   const [isDesktop, setIsDesktop] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [appsOpen, setAppsOpen] = useState(initialAppsOpen);
+  const [appsInitialApp, setAppsInitialApp] = useState<string | null>(initialApp);
 
   const [conversations, setConversations] = useState<ConversationRow[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
@@ -407,6 +415,7 @@ export function RevengeStudio() {
   const handledPostRef = useRef<Set<string>>(new Set());
   const fuAbortRef = useRef<AbortController | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localIdRef = useRef(0);
   const [dragActive, setDragActive] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
@@ -467,15 +476,16 @@ export function RevengeStudio() {
   /* ---------- boot / environment ---------- */
 
   useEffect(() => {
-    setGreeting(timeGreeting());
-    const saved = window.localStorage.getItem("revenge-theme");
-    if (saved === "claude-light" || saved === "claude-dark") setTheme(saved);
-
+    const frame = window.requestAnimationFrame(() => {
+      setGreeting(timeGreeting());
+      const saved = window.localStorage.getItem("revenge-theme");
+      if (saved === "claude-light" || saved === "claude-dark") setTheme(saved);
+      setIsDesktop(window.matchMedia("(min-width: 768px)").matches);
+    });
     const mq = window.matchMedia("(min-width: 768px)");
     const sync = () => setIsDesktop(mq.matches);
-    sync();
     mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
+    return () => { window.cancelAnimationFrame(frame); mq.removeEventListener("change", sync); };
   }, []);
 
   useEffect(() => {
@@ -567,10 +577,13 @@ export function RevengeStudio() {
   }, []);
 
   useEffect(() => {
-    void loadConversations();
-    void loadProviders();
-    void loadSettingsAndMemories();
-    void primeGuestScope();
+    const timer = window.setTimeout(() => {
+      void loadConversations();
+      void loadProviders();
+      void loadSettingsAndMemories();
+      void primeGuestScope();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadConversations, loadProviders, loadSettingsAndMemories]);
 
   /* ---------- scrolling (sticky-bottom, no jitter) ---------- */
@@ -626,7 +639,9 @@ export function RevengeStudio() {
 
   const closeMobileNav = () => setMobileNavOpen(false);
 
-  const handleNewChat = () => {
+  const handleNewChat = useCallback(() => {
+    setAppsOpen(false);
+    setAppsInitialApp(null);
     abortRef.current?.abort();
     setIsGenerating(false);
     setActiveConvId(null);
@@ -637,8 +652,8 @@ export function RevengeStudio() {
     setAttachments([]);
     setHomePill(null);
     stickRef.current = true;
-    closeMobileNav();
-  };
+    setMobileNavOpen(false);
+  }, [setArtifact]);
 
   /** Opens exactly the artifact object held in the thread so ids/versions stay in sync. */
   const openArtifact = (art: CanvasArtifactPayload) => {
@@ -649,6 +664,8 @@ export function RevengeStudio() {
   };
 
   const handleSelectConversation = async (conv: ConversationRow) => {
+    setAppsOpen(false);
+    setAppsInitialApp(null);
     // Switching threads must be instant. Abort the stream and drop the old
     // partial assistant message instead of letting it finish in the background.
     if (abortRef.current) {
@@ -730,7 +747,7 @@ export function RevengeStudio() {
     [settings.featureFlags]
   );
   const flagsRef = useRef(flags);
-  flagsRef.current = flags;
+  useEffect(() => { flagsRef.current = flags; }, [flags]);
   const tempOn = Boolean(flags.temp_chat);
 
   const setFlag = (id: string, value: boolean) => {
@@ -765,15 +782,17 @@ export function RevengeStudio() {
   }, [accent]);
 
   const isGenRef = useRef(false);
-  isGenRef.current = isGenerating;
   const overlaysRef = useRef(false);
-  overlaysRef.current = paletteOpen || shortcutsOpen || labOpen || Boolean(shareInfo) || plusOpen;
   const kbRef = useRef({ newChat: () => {}, toggleSidebar: () => {}, stop: () => {} });
-  kbRef.current = {
-    newChat: () => handleNewChat(),
-    toggleSidebar: () => (isDesktop ? setSidebarOpen((v) => !v) : setMobileNavOpen((v) => !v)),
-    stop: () => { abortRef.current?.abort(); setIsGenerating(false); },
-  };
+  useEffect(() => {
+    isGenRef.current = isGenerating;
+    overlaysRef.current = paletteOpen || shortcutsOpen || labOpen || Boolean(shareInfo) || plusOpen;
+    kbRef.current = {
+      newChat: () => handleNewChat(),
+      toggleSidebar: () => (isDesktop ? setSidebarOpen((v) => !v) : setMobileNavOpen((v) => !v)),
+      stop: () => { abortRef.current?.abort(); setIsGenerating(false); },
+    };
+  }, [isGenerating, paletteOpen, shortcutsOpen, labOpen, shareInfo, plusOpen, isDesktop, handleNewChat]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -1077,8 +1096,8 @@ export function RevengeStudio() {
     stickRef.current = true;
 
     const isAppending = Boolean(opts?.appendToAssistantId);
-    const tempUserId = `user-${Date.now()}`;
-    const targetId = opts?.appendToAssistantId || `assistant-${Date.now()}`;
+    const tempUserId = `user-${++localIdRef.current}`;
+    const targetId = opts?.appendToAssistantId || `assistant-${++localIdRef.current}`;
 
     if (!opts?.skipSaveUserMessage && !isAppending) {
       setMessages((prev) => [
@@ -1307,7 +1326,7 @@ export function RevengeStudio() {
             queueFlush();
           } else if (evt.type === "tool.started") {
             const run: ChatToolRun = {
-              executionId: evt.executionId || `exec_${Date.now()}`,
+              executionId: evt.executionId || `exec_${++localIdRef.current}`,
               tool: evt.tool || "execute_command",
               command: evt.command || "",
               status: "running",
@@ -1416,6 +1435,7 @@ export function RevengeStudio() {
                 if (m.id === targetId) {
                   return {
                     ...savedMsg,
+                    imageUrl: savedMsg.imageUrl || m.imageUrl,
                     role: "assistant",
                     isStreaming: false,
                     isThinking: false,
@@ -1615,6 +1635,14 @@ export function RevengeStudio() {
   };
 
   const openVault = (tab: VaultTab) => {
+    if (tab === "tools") {
+      setAppsInitialApp(null);
+      setAppsOpen(true);
+      setVaultOpen(false);
+      closeMobileNav();
+      setPlusOpen(false);
+      return;
+    }
     setVaultTab(tab);
     setVaultOpen(true);
     closeMobileNav();
@@ -1627,6 +1655,9 @@ export function RevengeStudio() {
     { id: "temp", label: tempOn ? "Turn off temporary chat" : "Turn on temporary chat", run: () => setFlag("temp_chat", !tempOn) },
     { id: "theme", label: theme === "claude-dark" ? "Switch to light theme" : "Switch to dark theme", run: () => setTheme((t) => (t === "claude-dark" ? "claude-light" : "claude-dark")) },
     { id: "keys", label: "Models & API keys", run: () => openVault("vault") },
+    { id: "tools", label: "Open REVENGE apps", run: () => { setAppsInitialApp(null); setAppsOpen(true); } },
+    { id: "downloader", label: "Open media downloader", run: () => { setAppsInitialApp("downloader"); setAppsOpen(true); } },
+    { id: "developer", label: "Developer Portal and API keys", run: () => router.push("/developers") },
     { id: "shortcuts", label: "Keyboard shortcuts", hint: "⌘/", run: () => setShortcutsOpen(true) },
   ];
 
@@ -1807,6 +1838,19 @@ export function RevengeStudio() {
         >
           <FolderKanban className="w-[18px] h-[18px] shrink-0" />
           {sidebarExpanded && <span>Projects</span>}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setAppsInitialApp(null);
+            setAppsOpen(true);
+            closeMobileNav();
+          }}
+          title="Open REVENGE apps"
+          className={`${navBtn} text-[var(--text-secondary)] ${!sidebarExpanded ? "justify-center px-0" : ""}`}
+        >
+          <LayoutGrid className="w-[18px] h-[18px] shrink-0 text-[var(--accent)]" />
+          {sidebarExpanded && <span>Apps</span>}
         </button>
         <button
           type="button"
@@ -1994,6 +2038,18 @@ export function RevengeStudio() {
             >
               <Camera className="w-[18px] h-[18px] text-[var(--text-secondary)]" />
               Take a photo
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPlusOpen(false);
+                setAppsInitialApp(null);
+                setAppsOpen(true);
+              }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] text-[var(--text-primary)] hover:bg-[var(--bg-elevated-2)] cursor-pointer"
+            >
+              <Activity className="w-[18px] h-[18px] text-[var(--accent)]" />
+              Open REVENGE apps
             </button>
             {(
               [
@@ -2385,13 +2441,13 @@ export function RevengeStudio() {
               </button>
               <div className="px-2 min-w-0">
                 <div className="text-[14.5px] font-medium text-[var(--text-primary)] truncate max-w-[52vw] md:max-w-[420px]">
-                  {messages.length === 0 ? "New chat" : activeConv?.title || "Chat"}
+                  {appsOpen ? "Apps" : messages.length === 0 ? "New chat" : activeConv?.title || "Chat"}
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-0.5">
-              {threadArtifacts.length > 0 && !artifact && (
+              {!appsOpen && threadArtifacts.length > 0 && !artifact && (
                 <button
                   type="button"
                   onClick={() =>
@@ -2406,7 +2462,7 @@ export function RevengeStudio() {
                   </span>
                 </button>
               )}
-              <button
+              {!appsOpen && <button
                 type="button"
                 aria-label="Temporary chat"
                 title={tempOn ? "Temporary chat is ON — nothing is saved" : "Temporary chat (nothing saved)"}
@@ -2418,7 +2474,7 @@ export function RevengeStudio() {
                 }`}
               >
                 <Ghost className="w-[18px] h-[18px]" />
-              </button>
+              </button>}
               <button
                 type="button"
                 aria-label="Search everything"
@@ -2428,7 +2484,7 @@ export function RevengeStudio() {
               >
                 <Search className="w-[18px] h-[18px]" />
               </button>
-              {activeConvId && !tempOn && messages.length > 0 && (
+              {!appsOpen && activeConvId && !tempOn && messages.length > 0 && (
                 <button
                   type="button"
                   aria-label="Share chat"
@@ -2440,7 +2496,7 @@ export function RevengeStudio() {
                   <Share2 className="w-[18px] h-[18px]" />
                 </button>
               )}
-              {messages.length > 0 && (
+              {!appsOpen && messages.length > 0 && (
                 <button
                   type="button"
                   aria-label="Export chat"
@@ -2450,18 +2506,20 @@ export function RevengeStudio() {
                   <Download className="w-[18px] h-[18px]" />
                 </button>
               )}
-              <button
+              {!appsOpen && <button
                 type="button"
                 aria-label="New chat"
                 onClick={handleNewChat}
                 className="md:hidden w-10 h-10 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] cursor-pointer"
               >
                 <SquarePen className="w-[18px] h-[18px]" />
-              </button>
+              </button>}
             </div>
           </header>
 
-          {messages.length === 0 ? (
+          {appsOpen ? (
+            <AppsWorkspace onOpenChat={() => { setAppsOpen(false); setAppsInitialApp(null); }} initialApp={appsInitialApp} />
+          ) : messages.length === 0 ? (
             /* ---------- HOME ---------- */
             <div className="flex-1 overflow-y-auto">
               <div className="min-h-full flex flex-col items-center justify-center px-4 pb-10 pt-4">
@@ -2805,6 +2863,13 @@ export function RevengeStudio() {
                           </div>
                         )}
 
+                        {msg.imageUrl && (
+                          <GeneratedImagePreview
+                            src={msg.imageUrl}
+                            alt={msg.content.match(/\*\*Prompt:\*\*\s*([^\n]+)/)?.[1] || "Generated image"}
+                          />
+                        )}
+
                         {msg.content ? (
                           <MarkdownRenderer
                             content={msg.content}
@@ -2977,7 +3042,7 @@ export function RevengeStudio() {
                   {tempOn && (
                     <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[12px] text-[var(--text-secondary)]">
                       <Ghost className="w-3.5 h-3.5 text-[var(--accent)] shrink-0" />
-                      <span className="truncate">Temporary chat — this conversation won't be saved.</span>
+                      <span className="truncate">Temporary chat — this conversation won&apos;t be saved.</span>
                       <button type="button" onClick={() => setFlag("temp_chat", false)} className="ml-auto text-[var(--accent)] font-medium cursor-pointer shrink-0">Turn off</button>
                     </div>
                   )}
@@ -3140,6 +3205,7 @@ export function RevengeStudio() {
         selectedModelId={selectedModelId}
         onSelectModel={handleSelectModel}
         onClearAllConversations={handleClearAllConversations}
+        onOpenToolCenter={() => { setVaultOpen(false); setAppsInitialApp(null); setAppsOpen(true); }}
       />
 
       <ModelPickerModal

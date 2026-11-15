@@ -136,6 +136,8 @@ const FAQS = [
 
 const FOOTER_LINKS: Array<{ label: string; href: string }> = [
   { label: "Open chat", href: "/chat" },
+  { label: "Tools", href: "/tools" },
+  { label: "Developers", href: "/developers" },
   { label: "Capabilities", href: "#capabilities" },
   { label: "Workflow", href: "#workflow" },
   { label: "FAQ", href: "#faq" },
@@ -149,8 +151,8 @@ function useReveal() {
     const el = ref.current;
     if (!el) return;
     if (typeof IntersectionObserver === "undefined") {
-      setVisible(true);
-      return;
+      const frame = window.requestAnimationFrame(() => setVisible(true));
+      return () => window.cancelAnimationFrame(frame);
     }
     const io = new IntersectionObserver(
       (entries) => {
@@ -201,8 +203,8 @@ export function LandingPage() {
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
     if (!supabase) {
-      setSignedIn(false);
-      return;
+      const frame = window.requestAnimationFrame(() => setSignedIn(false));
+      return () => window.cancelAnimationFrame(frame);
     }
     let alive = true;
     void supabase.auth.getUser().then(({ data }) => {
@@ -263,6 +265,8 @@ export function LandingPage() {
           </Link>
 
           <div className="flex items-center gap-2">
+            <Link href="/tools" className="hidden rounded-full px-3 py-2 text-[13px] text-white/75 transition hover:bg-white/[0.06] hover:text-white sm:inline-flex">Tools</Link>
+            <Link href="/developers" className="hidden rounded-full px-3 py-2 text-[13px] text-white/75 transition hover:bg-white/[0.06] hover:text-white sm:inline-flex">Developers</Link>
             <Link
               href="/chat"
               onClick={(e) => void openChat(e)}

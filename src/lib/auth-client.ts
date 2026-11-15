@@ -84,5 +84,7 @@ export async function signOut() {
   // Also clear the guest cookie so the next session starts clean.
   await fetch("/api/auth/signout", { method: "POST" }).catch(() => {});
   notifyAuthChanged(null);
+  // Force a full page transition so Supabase cookies and in-memory auth state are discarded.
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
   window.location.href = "/";
 }

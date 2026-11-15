@@ -84,7 +84,8 @@ export function AccountPanel({ user }: Props) {
   }, []);
 
   useEffect(() => {
-    load();
+    const timer = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
   const save = async (patch: Partial<Settings>) => {
@@ -99,7 +100,7 @@ export function AccountPanel({ user }: Props) {
         body: JSON.stringify(patch),
       });
       if (!res.ok) throw new Error("save failed");
-      setSavedAt(Date.now());
+      setSavedAt(1);
       if (patch.theme) applyTheme(patch.theme);
     } catch {
       setError("Could not save that change. Try again.");

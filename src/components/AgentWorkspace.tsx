@@ -205,7 +205,8 @@ export function AgentWorkspace({
   }, []);
 
   useEffect(() => {
-    void refreshSessions();
+    const timer = window.setTimeout(() => { void refreshSessions(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [refreshSessions]);
 
   useEffect(() => {
@@ -337,7 +338,7 @@ export function AgentWorkspace({
         void refreshSessions();
       }
     },
-    [upsertTool, refreshSessions]
+    [upsertTool, pushToTurn, refreshSessions]
   );
 
   const startTask = useCallback(
@@ -607,7 +608,9 @@ export function AgentWorkspace({
   }, [filesApi, sessionId]);
 
   useEffect(() => {
-    if (filesOpen && sessionId) void refreshFiles();
+    if (!filesOpen || !sessionId) return;
+    const timer = window.setTimeout(() => { void refreshFiles(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [filesOpen, sessionId, cwd, refreshFiles]);
 
   const openFileAtPath = useCallback(

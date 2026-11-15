@@ -394,6 +394,8 @@ export async function POST(req: Request) {
                   .set({
                     content: existingMsg.content + result.content,
                     providerUsed: result.providerUsed,
+                    imageUrl: result.imageUrl || existingMsg.imageUrl,
+                    videoUrl: result.videoUrl || existingMsg.videoUrl,
                     latencyMs: (existingMsg.latencyMs ?? 0) + result.latencyMs,
                     tokensPerSec: result.tokensPerSec,
                   })
@@ -425,11 +427,20 @@ export async function POST(req: Request) {
               savedAssistant = inserted;
             }
 
+            const streamedAssistant = savedAssistant
+              ? {
+                  ...savedAssistant,
+                  // The image event already delivered this payload; keep it out of the save acknowledgement to avoid a second multi-megabyte copy.
+                  imageUrl: savedAssistant.imageUrl?.startsWith("data:image/")
+                    ? null
+                    : savedAssistant.imageUrl,
+                }
+              : savedAssistant;
             send({
               type: "saved",
               conversationId: activeConvId,
               userMessageId: savedUserMsgId,
-              assistantMessage: savedAssistant,
+              assistantMessage: streamedAssistant,
             });
           }
         } catch (err) {

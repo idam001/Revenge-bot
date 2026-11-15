@@ -172,4 +172,34 @@ export const guestMerges = pgTable("guest_merges", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+/** Customer credentials: raw token is only returned at creation; only SHA-256 is stored. */
+export const customerApiKeys = pgTable("customer_api_keys", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("userId").notNull(),
+  name: text("name").notNull(),
+  prefix: text("prefix").notNull(),
+  keyHash: text("keyHash").notNull().unique(),
+  scopes: jsonb("scopes").$type<string[]>().notNull().default(["tools:execute"]),
+  allowedCategories: jsonb("allowedCategories").$type<string[]>().notNull().default([]),
+  requestsPerMinute: integer("requestsPerMinute").notNull().default(30),
+  windowStartedAt: timestamp("windowStartedAt").defaultNow().notNull(),
+  windowCount: integer("windowCount").notNull().default(0),
+  totalRequests: integer("totalRequests").notNull().default(0),
+  lastUsedAt: timestamp("lastUsedAt"),
+  expiresAt: timestamp("expiresAt"),
+  revokedAt: timestamp("revokedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const customerApiUsage = pgTable("customer_api_usage", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  keyId: uuid("keyId").notNull().references(() => customerApiKeys.id, { onDelete: "cascade" }),
+  endpointId: text("endpointId").notNull(),
+  status: integer("status").notNull(),
+  elapsedMs: integer("elapsedMs").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type GuestMergeRow = typeof guestMerges.$inferSelect;
+export type CustomerApiKeyRow = typeof customerApiKeys.$inferSelect;
+export type CustomerApiUsageRow = typeof customerApiUsage.$inferSelect;

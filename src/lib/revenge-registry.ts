@@ -7,7 +7,8 @@ export type KeylessClusterId =
   | "aihorde"
   | "pollinations"
   | "chat-relay"
-  | "flux-image";
+  | "flux-image"
+  | "nabees-ai";
 
 export interface KeylessRouteTarget {
   cluster: KeylessClusterId;
@@ -100,6 +101,23 @@ export const APP_NAME = "REVENGE GPT";
  * plus a dedicated always-on live web search model.
  */
 export const KEYLESS_MODELS: AIModelDefinition[] = [
+  {
+    id: "keyless-nabees-deepseek-v4-flash",
+    name: "DeepSeek V4 Flash",
+    shortName: "DeepSeek V4 Flash",
+    providerId: "keyless",
+    providerLabel: "REVENGE",
+    requiresKey: false,
+    upstreamModel: "deepseek/deepseek-v4-flash",
+    keylessRoutes: [{ cluster: "nabees-ai", model: "deepseek-v4-flash", maxTokens: 4096 }],
+    category: "reasoning",
+    badge: "RECENT • DEEPSEEK V4 FLASH",
+    description: "DeepSeek V4 Flash through a server-side managed model connection. Provider limits may apply.",
+    contextWindow: "Provider managed",
+    maxOutputLabel: "Provider managed",
+    speedRating: "Variable",
+    supportsReasoning: false,
+  },
   {
     id: "revenge-omega-x",
     name: "REVENGE 4.5 Sonnet-Unchained",
@@ -1282,6 +1300,42 @@ export const KEYLESS_MODELS: AIModelDefinition[] = [
     supportsReasoning: false,
     supportsImageGen: true,
     imageBackend: "pollinations-flux",
+  },
+  {
+    id: "keyless-nabees-flux-schnell",
+    name: "REVENGE FLUX Schnell (Free Image)",
+    shortName: "REVENGE FLUX Schnell",
+    providerId: "keyless",
+    providerLabel: "REVENGE",
+    requiresKey: false,
+    upstreamModel: "flux-schnell",
+    category: "multimodal",
+    badge: "IMAGE • FLUX SCHNELL • 1024²",
+    description: "FLUX Schnell image generation through a managed connection with provider failover.",
+    contextWindow: "Image",
+    maxOutputLabel: "1024×1024 JPEG",
+    speedRating: "Variable",
+    supportsReasoning: false,
+    supportsImageGen: true,
+    imageBackend: "nabees-flux-schnell",
+  },
+  {
+    id: "keyless-nabees-sdxl",
+    name: "REVENGE SDXL (Free Image)",
+    shortName: "REVENGE SDXL",
+    providerId: "keyless",
+    providerLabel: "REVENGE",
+    requiresKey: false,
+    upstreamModel: "sdxl",
+    category: "multimodal",
+    badge: "IMAGE • SDXL • 1024²",
+    description: "SDXL image generation through a managed connection, with failover to other image engines when available.",
+    contextWindow: "Image",
+    maxOutputLabel: "1024×1024 JPEG/PNG",
+    speedRating: "Variable",
+    supportsReasoning: false,
+    supportsImageGen: true,
+    imageBackend: "nabees-sdxl",
   },
   {
     id: "keyless-horde-dreamshaper",

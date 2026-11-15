@@ -423,6 +423,30 @@ function resolveEnvApiKey(providerId: string): string | undefined {
   return undefined;
 }
 
+async function callProviderTextCluster(params: {
+  messages: ChatTurnMessage[];
+  onContent: (text: string) => void;
+}): Promise<{ gotOutput: boolean; finishReason: string | null; emittedChars: number }> {
+  const apiKey = process.env.NABEES_API_KEY?.trim() || "nabeestech";
+  const context = params.messages.slice(-10).map((m) => {
+    const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+    return `${m.role.toUpperCase()}: ${content}`;
+  }).join("\n\n").slice(-9000);
+  const url = new URL("https://apis.nabeestech.com/api/v1/ai/deepseek-v4-flash");
+  url.searchParams.set("q", context);
+  const res = await fetch(url, {
+    headers: { "X-API-Key": apiKey, Accept: "application/json" },
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!res.ok) throw new Error(`REVENGE AI provider HTTP ${res.status}`);
+  const json = (await res.json()) as { success?: boolean; response?: string };
+  if (!json.success || !json.response?.trim()) throw new Error("REVENGE AI provider returned an empty response");
+  const output = json.response.trim();
+  if (looksLikeCannedRefusal(output)) throw new RefusalInterceptedError(output);
+  for (const part of output.match(/[\s\S]{1,42}/g) ?? [output]) params.onContent(part);
+  return { gotOutput: true, finishReason: "stop", emittedChars: output.length };
+}
+
 const ROUTE_PERSONAS: Record<string, string> = {
   "dots-studio/dots-3-note-preview:free": "REVENGE Dots 3 UltraWriter",
   "nvidia/nemotron-3.5-super-vl:free": "REVENGE Nemotron 3.5 Super Coder",
@@ -462,6 +486,11 @@ const CLUSTER_ENDPOINTS: Record<
     url: "https://ch.at/v1/chat/completions",
     label: "Instant Relay Mesh",
     timeoutMs: 8000,
+  },
+  "nabees-ai": {
+    url: "https://apis.nabeestech.com/api/v1/ai/deepseek-v4-flash",
+    label: "REVENGE AI • DeepSeek V4 Flash",
+    timeoutMs: 65000,
   },
 };
 
@@ -1414,7 +1443,6 @@ export async function streamRevengeCompletion(
     opts.onEvent({ type: "image", imageUrl: media.url });
 
     const caption =
-      `![${rawVisualPrompt.slice(0, 70)}](${media.url})\n\n` +
       `**Prompt:** ${rawVisualPrompt}  \n` +
       `**Engine:** \`${media.providerUsed}\` · **Resolution:** \`${media.resolution}\` · **Seed:** \`#${media.seed}\``;
 
@@ -1799,7 +1827,9 @@ export async function streamRevengeCompletion(
       opts.onEvent({ type: "meta", modelId: model.id, providerUsed: routeLabel });
 
       const firstPass =
-        route.cluster === "aihorde"
+        route.cluster === "nabees-ai"
+          ? await callProviderTextCluster({ messages: nodeMessages, onContent: emitContent })
+          : route.cluster === "aihorde"
           ? await callAiHordeTextCluster({
               upstreamModel: route.model,
               messages: nodeMessages,
@@ -1846,7 +1876,7 @@ export async function streamRevengeCompletion(
       const needsMore = () => {
         // The browser went away: stop immediately, do not keep generating.
         if (opts.abortSignal?.aborted) return false;
-        if (Date.now() > deadline) return false;
+        if (Date.now() > deadline || route.cluster === "nabees-ai") return false;
         const lineTotal = fullContent.split("\n").length;
         if (requestedLines && lineTotal < requestedLines * 0.92) return true;
         // Below the floor for a build request: keep this same model writing.
@@ -1907,7 +1937,7 @@ export async function streamRevengeCompletion(
       }
 
       // In-chat live execution (any model): run code for real, then verify.
-      await runInChatExecutionPhase({
+      if (route.cluster !== "nabees-ai") await runInChatExecutionPhase({
         model,
         lastUserMsg,
         getContent: () => fullContent,

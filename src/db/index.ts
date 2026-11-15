@@ -208,6 +208,36 @@ export async function ensureDbSchema(): Promise<void> {
           "createdAt" timestamp NOT NULL DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS "agent_messages_session_idx" ON "agent_messages" ("sessionId", "createdAt");
+
+        -- Customer API keys: never persist plaintext credentials. Prefixes are identifiers only.
+        CREATE TABLE IF NOT EXISTS "customer_api_keys" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          "userId" uuid NOT NULL,
+          "name" text NOT NULL,
+          "prefix" text NOT NULL,
+          "keyHash" text NOT NULL UNIQUE,
+          "scopes" jsonb NOT NULL DEFAULT '["tools:execute"]'::jsonb,
+          "allowedCategories" jsonb NOT NULL DEFAULT '[]'::jsonb,
+          "requestsPerMinute" integer NOT NULL DEFAULT 30,
+          "windowStartedAt" timestamp NOT NULL DEFAULT now(),
+          "windowCount" integer NOT NULL DEFAULT 0,
+          "totalRequests" integer NOT NULL DEFAULT 0,
+          "lastUsedAt" timestamp,
+          "expiresAt" timestamp,
+          "revokedAt" timestamp,
+          "createdAt" timestamp NOT NULL DEFAULT now()
+        );
+        ALTER TABLE "customer_api_keys" ADD COLUMN IF NOT EXISTS "allowedCategories" jsonb NOT NULL DEFAULT '[]'::jsonb;
+        CREATE INDEX IF NOT EXISTS "customer_api_keys_user_idx" ON "customer_api_keys" ("userId", "createdAt" DESC);
+        CREATE TABLE IF NOT EXISTS "customer_api_usage" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          "keyId" uuid NOT NULL REFERENCES "customer_api_keys"("id") ON DELETE CASCADE,
+          "endpointId" text NOT NULL,
+          "status" integer NOT NULL,
+          "elapsedMs" integer NOT NULL DEFAULT 0,
+          "createdAt" timestamp NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS "customer_api_usage_key_idx" ON "customer_api_usage" ("keyId", "createdAt" DESC);
       `);
     })().catch((err) => {
       globalForDb.__revengeSchemaReady = undefined;

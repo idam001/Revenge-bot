@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Check,
@@ -51,6 +51,64 @@ const EXTENSIONS: Record<string, string> = {
   yaml: "yml",
   yml: "yml",
 };
+
+export function GeneratedImagePreview({ src, alt }: { src: string; alt?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="my-3 max-w-xl rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 text-sm text-[var(--text-secondary)]">
+        <p className="font-medium">This image could not be loaded.</p>
+        {src.startsWith("http") && (
+          <a href={src} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-[var(--accent)] hover:underline">Try opening the image directly ↗</a>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="my-3 max-w-xl overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] shadow-lg">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt || "Generated image"} className="h-auto min-h-[220px] w-full object-cover" loading="lazy" onError={() => setFailed(true)} />
+      <div className="flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] px-3.5 py-2 text-xs text-[var(--text-secondary)]">
+        <span className="truncate">{alt || "Generated image"}</span>
+        <a href={src} target="_blank" rel="noopener noreferrer" className="shrink-0 text-[var(--accent)] hover:underline">Open full size ↗</a>
+      </div>
+    </div>
+  );
+}
+
+function MarkdownImage({ src, alt }: { src: string; alt?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span className="my-4 block max-w-xl rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 text-sm text-[var(--text-secondary)]">
+        <span className="block font-medium">This image could not be loaded.</span>
+        {src.startsWith("http") && (
+          <a href={src} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-[var(--accent)] hover:underline">
+            Try opening the image directly ↗
+          </a>
+        )}
+      </span>
+    );
+  }
+  return (
+    <span className="block my-4 rounded-2xl overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-elevated)] shadow-lg max-w-xl">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt || "Generated image"}
+        className="w-full h-auto object-cover min-h-[220px]"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+      <span className="flex items-center justify-between px-3.5 py-2 text-xs text-[var(--text-secondary)] border-t border-[var(--border-subtle)]">
+        <span className="truncate">{alt || "Generated image"}</span>
+        <a href={src} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] font-medium ml-3 shrink-0 hover:underline">
+          Open full size ↗
+        </a>
+      </span>
+    </span>
+  );
+}
 
 export function getFileExtension(lang: string): string {
   return EXTENSIONS[lang.toLowerCase()] || "txt";
@@ -313,10 +371,9 @@ function CodeBlockCard({
   const collapsed = lineCount > 28 && !userOpened;
 
   useEffect(() => {
-    if (pinnedOpenBlocks.has(stableBlockKey(language, code))) {
-      setUserOpened(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!pinnedOpenBlocks.has(stableBlockKey(language, code))) return;
+    const frame = window.requestAnimationFrame(() => setUserOpened(true));
+    return () => window.cancelAnimationFrame(frame);
   }, [code, language]);
   const canPreview = isPreviewableArtifact(language, code);
   const title = inferArtifactTitle(language, code);
@@ -487,6 +544,11 @@ export function MarkdownRenderer({
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={(url) =>
+          /^data:image\/(?:png|jpeg|webp);base64,/i.test(url)
+            ? url
+            : defaultUrlTransform(url)
+        }
         components={{
           h1: ({ children }) => (
             <h1 className="font-claude-serif text-[22px] font-semibold text-[var(--text-primary)] mt-5 mb-2.5 tracking-tight">
@@ -530,28 +592,7 @@ export function MarkdownRenderer({
           img: ({ src, alt }) => {
             const imgSrc = typeof src === "string" ? src : "";
             if (!imgSrc) return null;
-            return (
-              <span className="block my-4 rounded-2xl overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-elevated)] shadow-lg max-w-xl">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={imgSrc}
-                  alt={alt || "Generated image"}
-                  className="w-full h-auto object-cover min-h-[220px]"
-                  loading="lazy"
-                />
-                <span className="flex items-center justify-between px-3.5 py-2 text-xs text-[var(--text-secondary)] border-t border-[var(--border-subtle)]">
-                  <span className="truncate">{alt || "Generated image"}</span>
-                  <a
-                    href={imgSrc}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[var(--accent)] font-medium ml-3 shrink-0 hover:underline"
-                  >
-                    Open full size ↗
-                  </a>
-                </span>
-              </span>
-            );
+            return <MarkdownImage src={imgSrc} alt={alt || undefined} />;
           },
           table: ({ children }) => (
             <div className="my-4 overflow-x-auto rounded-xl border border-[var(--border-subtle)]">

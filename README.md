@@ -91,6 +91,31 @@ run `npx drizzle-kit push`.
 | `/api/stats` | Usage stats |
 | `/api/media/[file]` | Media store |
 
+## REVENGE Tools registry
+
+The 194-entry curated catalog remains the compatible live registry. The catalog API now supports ranked query/category/tag/auth/method filtering, endpoint detail responses, additive provider/provenance/auth/example metadata, ETags, and per-invocation rate-limit headers. Existing examples are explicitly marked unverified until a real successful provider response has been observed; no upstream service or license is represented as verified just because it appears in a directory.
+
+The Public APIs README discovery parser is a metadata-only seed. To preview its current rows without publishing them:
+
+```bash
+npm run ingest -- --source=all --dry-run
+```
+
+Raw source responses are cached under `.cache/ingest/` (gitignored). External directory rows are deliberately not exposed as executable tools until a provider contract, licensing/terms, safe request mapping, and working example have all been checked. `config/sources.json` records the planned inputs and their current publication policies. The ingest run does not implement the apis.guru or Hugging Face parsers yet.
+
+## Movie Box
+
+Movie Box searches Internet Archive feature-film metadata and only enables playback/download links when the source reports a supported public-domain or Creative Commons license. It keeps watchlist and resume progress in browser-local storage. The Archive item and license pages are the source of truth; users should review them before reuse. It is not a catalog for commercial new releases and does not bypass DRM, paywalls, or access controls.
+
+## Verification commands
+
+```bash
+npm run typecheck
+npm run test
+npm run ingest -- --source=all --dry-run
+npm run build
+```
+
 ---
 
 Built by **Idam Emmanuel**.

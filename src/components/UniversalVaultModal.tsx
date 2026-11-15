@@ -14,6 +14,8 @@ import {
   Trash2,
   X,
   Zap,
+  Wrench,
+  ArrowUpRight,
 } from "lucide-react";
 import {
   KEYLESS_MODELS,
@@ -33,7 +35,7 @@ export interface ProviderStatusItem extends ProviderDefinition {
 
 interface UniversalVaultModalProps {
   open: boolean;
-  initialTab?: "vault" | "keyless" | "project" | "engine" | "memory";
+  initialTab?: "vault" | "keyless" | "project" | "engine" | "memory" | "tools";
   onClose: () => void;
   providers: ProviderStatusItem[];
   onRefreshProviders: () => Promise<void>;
@@ -44,6 +46,7 @@ interface UniversalVaultModalProps {
   selectedModelId: string;
   onSelectModel: (modelId: string) => void;
   onClearAllConversations: () => Promise<void>;
+  onOpenToolCenter: () => void;
 }
 
 export function UniversalVaultModal({
@@ -59,9 +62,10 @@ export function UniversalVaultModal({
   selectedModelId,
   onSelectModel,
   onClearAllConversations,
+  onOpenToolCenter,
 }: UniversalVaultModalProps) {
   const [activeTab, setActiveTab] = useState<
-    "vault" | "keyless" | "project" | "engine" | "memory"
+    "vault" | "keyless" | "project" | "engine" | "memory" | "tools"
   >(initialTab);
   const [searchProvider, setSearchProvider] = useState("");
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
@@ -344,6 +348,7 @@ export function UniversalVaultModal({
               icon: Brain,
               label: memories.length ? `Memory · ${memories.length}` : "Memory",
             },
+            { id: "tools", icon: Wrench, label: "REVENGE Tools" },
           ].map((t) => {
             const Icon = t.icon;
             const active = activeTab === t.id;
@@ -359,6 +364,7 @@ export function UniversalVaultModal({
                       | "project"
                       | "engine"
                       | "memory"
+                      | "tools"
                   )
                 }
                 className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium transition whitespace-nowrap cursor-pointer ${
@@ -376,6 +382,31 @@ export function UniversalVaultModal({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 safe-bottom">
+          {activeTab === "tools" && (
+            <section className="mx-auto max-w-3xl space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold">REVENGE apps</h3>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">Open a finished experience for the task you want to do—chat, download media, create, search, and more.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <article className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4">
+                  <h4 className="font-semibold">Open the app space</h4>
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">Pick an app and complete the task in its own workspace. No endpoint setup needed.</p>
+                  <button type="button" onClick={onOpenToolCenter} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-3.5 py-2.5 text-xs font-semibold text-white">Explore REVENGE apps <ArrowUpRight className="h-3.5 w-3.5" /></button>
+                </article>
+                <article className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4">
+                  <h4 className="font-semibold">AI models, including ChatGPT</h4>
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">Connect OpenAI-compatible models and manage other model providers from API keys. This adds model access; it does not imply every feature of the ChatGPT product.</p>
+                  <button type="button" onClick={() => setActiveTab("vault")} className="mt-4 inline-flex items-center gap-2 rounded-xl border border-[var(--border-strong)] px-3.5 py-2.5 text-xs font-semibold text-[var(--text-primary)]">Open API keys <ArrowUpRight className="h-3.5 w-3.5" /></button>
+                </article>
+                <article className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 sm:col-span-2">
+                  <h4 className="font-semibold">Built-in tools</h4>
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">Web search, image and video creation, code execution, model comparison, and other chat actions are available from the composer’s add-tools menu.</p>
+                </article>
+              </div>
+            </section>
+          )}
+
           {/* CLAUDE PROJECTS / CUSTOM KNOWLEDGE TAB */}
           {activeTab === "project" && (
             <div className="max-w-3xl space-y-4">

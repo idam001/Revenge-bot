@@ -1,3 +1,6 @@
+# generated API catalog cache
+/.cache/ingest/
+
 # deps
 /node_modules
 /.pnp

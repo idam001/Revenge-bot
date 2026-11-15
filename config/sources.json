@@ -1,0 +1,32 @@
+[
+  {
+    "name": "public-apis",
+    "type": "git-file",
+    "fetchUrl": "https://raw.githubusercontent.com/public-apis/public-apis/master/README.md",
+    "parser": "public-apis-markdown-tables",
+    "license": "MIT",
+    "refreshCadence": "weekly",
+    "categoryHints": ["open-data", "developer", "weather", "finance", "science", "media", "utilities"],
+    "publicationPolicy": "metadata-only-until-contract-and-working-example-verified"
+  },
+  {
+    "name": "apis-guru",
+    "type": "http-json",
+    "fetchUrl": "https://api.apis.guru/v2/list.json",
+    "parser": "openapi-index",
+    "license": "CC0-1.0",
+    "refreshCadence": "weekly",
+    "categoryHints": ["developer", "open-data", "utilities"],
+    "publicationPolicy": "not-implemented"
+  },
+  {
+    "name": "huggingface-models",
+    "type": "http-json",
+    "fetchUrl": "https://huggingface.co/api/models",
+    "parser": "hf-model-metadata",
+    "license": "provider-specific",
+    "refreshCadence": "weekly",
+    "categoryHints": ["ai", "llm", "image", "audio"],
+    "publicationPolicy": "metadata-only"
+  }
+]

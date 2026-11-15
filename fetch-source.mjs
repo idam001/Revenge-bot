@@ -3,7 +3,7 @@
 import { writeFileSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 
-const url = "https://fszewuewdsjloiwwggvy.supabase.co/storage/v1/object/public/deploy/source-research-workspace-20261104.tar.gz";
+const url = "https://www.dropbox.com/scl/fi/t6655yv1565ku92uifogv/revenge-gpt-release-20261115.tar.gz?rlkey=rkk5mzp3hx1sm73tsjw7x8f03&dl=1";
 const res = await fetch(url);
 if (!res.ok) throw new Error("source download failed " + res.status);
 writeFileSync("/tmp/src.tar.gz", Buffer.from(await res.arrayBuffer()));

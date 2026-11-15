@@ -1,5 +1,3 @@
-import { saveMediaBuffer } from "./media-store";
-
 export type VideoBackendId =
   | "ltx-video-13b"
   | "ltx-zerogpu-pro"
@@ -10,7 +8,9 @@ export type ImageBackendId =
   | "bfl-flux-schnell"
   | "nvidia-sana"
   | "pollinations-flux"
-  | "aihorde-sd";
+  | "aihorde-sd"
+  | "nabees-flux-schnell"
+  | "nabees-sdxl";
 
 export interface GeneratedMediaResult {
   url: string;
@@ -35,27 +35,29 @@ function parseGradioCompletePayload(rawSse: string): unknown {
   throw new Error("Gradio Space closed stream before completing");
 }
 
-async function cacheRemoteBinary(
-  remoteUrl: string,
-  ext: "mp4" | "webp" | "jpg" | "png",
-  timeoutMs = 25000,
-  headers?: Record<string, string>
-): Promise<string> {
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const res = await fetch(remoteUrl, { headers, signal: ac.signal });
-    if (!res.ok) {
-      throw new Error(`Media download HTTP ${res.status}`);
+function inlineImageDataUrl(raw: string, fallbackMime = "image/webp"): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("data:image/")) {
+    const comma = trimmed.indexOf(",");
+    if (comma < 0) throw new Error("Image provider returned malformed inline data");
+    const payload = trimmed.slice(comma + 1);
+    if (Buffer.from(payload, "base64").byteLength > 6 * 1024 * 1024) {
+      throw new Error("Generated image is too large to store with this conversation");
     }
-    const ab = await res.arrayBuffer();
-    if (ab.byteLength < 1024) {
-      throw new Error("Downloaded media buffer too small");
-    }
-    return await saveMediaBuffer(Buffer.from(ab), ext);
-  } finally {
-    clearTimeout(timer);
+    return trimmed;
   }
+
+  const bytes = Buffer.from(trimmed, "base64");
+  if (bytes.byteLength < 1024) throw new Error("Generated image data is empty or invalid");
+  if (bytes.byteLength > 6 * 1024 * 1024) {
+    throw new Error("Generated image is too large to store with this conversation");
+  }
+  const mime = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    ? "image/png"
+    : bytes[0] === 0xff && bytes[1] === 0xd8
+    ? "image/jpeg"
+    : fallbackMime;
+  return `data:${mime};base64,${bytes.toString("base64")}`;
 }
 
 /* ===================================================================== *
@@ -115,9 +117,7 @@ async function runLightricksLtx13B(
     vid?.url || (vid?.path ? `${base}/gradio_api/file=${vid.path}` : "");
   if (!remoteUrl) throw new Error("LTX-13B returned no video file");
 
-  const localUrl = await cacheRemoteBinary(remoteUrl, "mp4", 30000, headers).catch(
-    () => remoteUrl
-  );
+  const localUrl = remoteUrl;
 
   return {
     url: localUrl,
@@ -182,9 +182,7 @@ async function runDeepRatLtxPro(
     vid?.url || (vid?.path ? `${base}/gradio_api/file=${vid.path}` : "");
   if (!remoteUrl) throw new Error("LTX-Pro returned no video file");
 
-  const localUrl = await cacheRemoteBinary(remoteUrl, "mp4", 30000, headers).catch(
-    () => remoteUrl
-  );
+  const localUrl = remoteUrl;
 
   return {
     url: localUrl,
@@ -245,9 +243,7 @@ async function runAnimateDiffLightning(
   if (!vPath) throw new Error("AnimateDiff returned no video path");
   // Gradio 4.36 serves files cleanly at /file=<path>
   const remoteUrl = `${base}/file=${vPath}`;
-  const localUrl = await cacheRemoteBinary(remoteUrl, "mp4", 30000, headers).catch(
-    () => remoteUrl
-  );
+  const localUrl = remoteUrl;
 
   return {
     url: localUrl,
@@ -327,7 +323,7 @@ async function runOvhSdxl(prompt: string): Promise<GeneratedMediaResult> {
   const json = (await res.json()) as { data?: Array<{ b64_json?: string }> };
   const b64 = json.data?.[0]?.b64_json;
   if (!b64) throw new Error("OVH SDXL returned empty b64_json");
-  const localUrl = await saveMediaBuffer(Buffer.from(b64, "base64"), "png");
+  const localUrl = inlineImageDataUrl(b64, "image/png");
   return {
     url: localUrl,
     providerUsed: "Stability AI SDXL 1.0 FP32 (OVH Bare-Metal Keyless)",
@@ -368,12 +364,7 @@ async function runBflFluxSchnell(
     img?.url || (img?.path ? `${base}/gradio_api/file=${img.path}` : "");
   if (!remoteUrl) throw new Error("BFL Flux returned no image URL");
 
-  const localUrl = await cacheRemoteBinary(
-    remoteUrl,
-    "webp",
-    20000,
-    headers
-  ).catch(() => remoteUrl);
+  const localUrl = remoteUrl;
 
   return {
     url: localUrl,
@@ -394,12 +385,48 @@ async function runPollinationsModel(
     enhanced
   )}?width=1024&height=768&seed=${seed}&nologo=true&model=${modelName}`;
 
-  const localUrl = await cacheRemoteBinary(remoteUrl, "jpg", 22000);
+  const localUrl = remoteUrl;
   return {
     url: localUrl,
     providerUsed: label,
     seed,
     resolution: "1024×768 HD",
+  };
+}
+
+async function runRevengeImageProvider(
+  prompt: string,
+  endpoint: "flux-schnell" | "sdxl"
+): Promise<GeneratedMediaResult> {
+  // The provider credential is only used server-side; never send it to browser code.
+  const apiKey = process.env.NABEES_API_KEY?.trim() || "nabeestech";
+  const url = new URL(`https://apis.nabeestech.com/api/v1/ai/${endpoint}`);
+  url.searchParams.set("prompt", prompt.slice(0, 1800));
+  const res = await fetch(url, {
+    headers: { "X-API-Key": apiKey, Accept: "application/json" },
+    signal: AbortSignal.timeout(90000),
+  });
+  if (!res.ok) throw new Error(`REVENGE image provider HTTP ${res.status}`);
+  const json = (await res.json()) as {
+    success?: boolean;
+    image_url?: string;
+    model?: string;
+    width?: number;
+    height?: number;
+    size?: string;
+  };
+  if (!json.success || !json.image_url) throw new Error(`REVENGE image provider returned no image`);
+  const remote = new URL(json.image_url);
+  if (remote.protocol !== "https:" || !["image.pollinations.ai", "api.rewind.ai"].includes(remote.hostname)) {
+    throw new Error("Image provider returned an unexpected image host");
+  }
+  const localUrl = json.image_url;
+  const dims = json.width && json.height ? `${json.width}×${json.height}` : json.size || "1024×1024";
+  return {
+    url: localUrl,
+    providerUsed: `REVENGE image engine • ${json.model || endpoint}`,
+    seed: Math.floor(100000 + Math.random() * 900000),
+    resolution: `${dims} JPEG`,
   };
 }
 
@@ -459,17 +486,9 @@ async function runAiHordeImage(
     if (st.done && st.generations?.[0]?.img) {
       const gen = st.generations[0];
       const imgField = gen.img!;
-      let localUrl = imgField;
-      if (imgField.startsWith("http")) {
-        localUrl = await cacheRemoteBinary(imgField, "webp", 15000).catch(
-          () => imgField
-        );
-      } else {
-        localUrl = await saveMediaBuffer(
-          Buffer.from(imgField, "base64"),
-          "webp"
-        );
-      }
+      const localUrl = imgField.startsWith("http")
+        ? imgField
+        : inlineImageDataUrl(imgField);
       return {
         url: localUrl,
         providerUsed: `AI Horde GPU Grid • ${gen.model || "DreamShaper"} (Keyless)`,
@@ -522,6 +541,14 @@ export async function generateKeylessImage(opts: {
       label: "AI Horde Community GPU Grid",
       fn: () => runAiHordeImage(opts.prompt, opts.hordeKey),
     },
+    "nabees-flux-schnell": {
+      label: "REVENGE Flux Schnell",
+      fn: () => runRevengeImageProvider(opts.prompt, "flux-schnell"),
+    },
+    "nabees-sdxl": {
+      label: "REVENGE SDXL",
+      fn: () => runRevengeImageProvider(opts.prompt, "sdxl"),
+    },
   };
 
   const allOrder: ImageBackendId[] = [
@@ -530,6 +557,8 @@ export async function generateKeylessImage(opts: {
     "bfl-flux-schnell",
     "pollinations-flux",
     "aihorde-sd",
+    "nabees-flux-schnell",
+    "nabees-sdxl",
   ];
   const order: ImageBackendId[] = [
     opts.preferred,
@@ -551,5 +580,5 @@ export async function generateKeylessImage(opts: {
       errors.push(`${id}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  throw new Error(`All 5 image engines busy (${errors.join("; ")})`);
+  throw new Error(`All image engines busy (${errors.join("; ")})`);
 }

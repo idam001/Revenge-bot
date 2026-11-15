@@ -40,40 +40,44 @@ export function CommandPalette({ open, onClose, actions, onOpenConversation }: C
   const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => {
       setQuery("");
       setChats([]);
       setHits([]);
       setActive(0);
-      setTimeout(() => inputRef.current?.focus(), 30);
-    }
+    });
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 30);
+    return () => { window.cancelAnimationFrame(frame); window.clearTimeout(focusTimer); };
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const q = query.trim();
     if (q.length < 2) {
-      setChats([]);
-      setHits([]);
-      setLoading(false);
-      return;
+      const frame = window.requestAnimationFrame(() => {
+        setChats([]);
+        setHits([]);
+        setLoading(false);
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
-    setLoading(true);
-    const t = setTimeout(async () => {
+    let cancelled = false;
+    const frame = window.requestAnimationFrame(() => setLoading(true));
+    const t = window.setTimeout(async () => {
       try {
         const r = await apiFetch(`/api/search-messages?q=${encodeURIComponent(q)}`);
         if (r.ok) {
           const d = (await r.json()) as { chats?: ChatHit[]; hits?: MsgHit[] };
-          setChats(d.chats ?? []);
-          setHits(d.hits ?? []);
+          if (!cancelled) { setChats(d.chats ?? []); setHits(d.hits ?? []); }
         }
       } catch {
         /* offline: actions still work */
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }, 220);
-    return () => clearTimeout(t);
+    return () => { cancelled = true; window.cancelAnimationFrame(frame); window.clearTimeout(t); };
   }, [query, open]);
 
   const filteredActions = useMemo(() => {
@@ -91,7 +95,10 @@ export function CommandPalette({ open, onClose, actions, onOpenConversation }: C
     [filteredActions, chats, hits]
   );
 
-  useEffect(() => setActive(0), [flat.length]);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setActive(0));
+    return () => window.cancelAnimationFrame(frame);
+  }, [flat.length]);
 
   useEffect(() => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`);

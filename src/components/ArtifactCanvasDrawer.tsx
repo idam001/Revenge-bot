@@ -273,7 +273,9 @@ export function ArtifactCanvasDrawer({
   };
 
   useEffect(() => {
-    if (artifact) setTab(canPreview ? "preview" : "code");
+    if (!artifact) return;
+    const timer = window.setTimeout(() => setTab(canPreview ? "preview" : "code"), 0);
+    return () => window.clearTimeout(timer);
     // Only re-pick the tab when a different artifact is opened
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artifact?.id, artifact?.language]);
@@ -295,7 +297,8 @@ export function ArtifactCanvasDrawer({
   }, [artifact, canPreview]);
 
   useEffect(() => {
-    setRuntimeError(null);
+    const timer = window.setTimeout(() => setRuntimeError(null), 0);
+    return () => window.clearTimeout(timer);
   }, [srcDoc, refreshNonce]);
 
   useEffect(() => {
