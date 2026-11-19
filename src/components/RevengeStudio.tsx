@@ -90,6 +90,7 @@ import { PromptArsenalModal } from "./PromptArsenalModal";
 import { SparkIcon } from "./SparkIcon";
 import { FeatureLab } from "./FeatureLab";
 import { AgentWorkspace } from "./AgentWorkspace";
+import { ProjectHubsModal } from "./ProjectHubsModal";
 import { ResearchWorkspace } from "./ResearchWorkspace";
 import { AppsWorkspace } from "./AppsWorkspace";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
@@ -368,6 +369,7 @@ export function RevengeStudio({ initialAppsOpen = false, initialApp = null }: { 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [appsOpen, setAppsOpen] = useState(initialAppsOpen);
   const [appsInitialApp, setAppsInitialApp] = useState<string | null>(initialApp);
+  const [projectHubsOpen, setProjectHubsOpen] = useState(false);
 
   const [conversations, setConversations] = useState<ConversationRow[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
@@ -1087,7 +1089,7 @@ export function RevengeStudio({ initialAppsOpen = false, initialApp = null }: { 
     if (flags.len_short) styleBits.push("Keep answers tight — under 150 words unless code is required.");
     if (flags.len_detailed) styleBits.push("Be thorough — cover context, steps, trade-offs and edge cases.");
     if (flags.plain_format) styleBits.push("Plain style: no emojis, minimal headings, clean direct prose.");
-    const stylePrompt = [settings.customSystemPrompt, styleBits.join(" ")].filter(Boolean).join("\n\n");
+    const stylePrompt = [settings.customSystemPrompt, activeConv?.systemPrompt, styleBits.join(" ")].filter(Boolean).join("\n\n");
     const isTemp = tempOn && !opts?.appendToAssistantId;
     fuAbortRef.current?.abort();
     setFollowUps({});
@@ -1832,8 +1834,8 @@ export function RevengeStudio({ initialAppsOpen = false, initialApp = null }: { 
         </button>
         <button
           type="button"
-          onClick={() => openVault("project")}
-          title="Projects & instructions"
+          onClick={() => { setProjectHubsOpen(true); closeMobileNav(); }}
+          title="Project Hubs"
           className={`${navBtn} text-[var(--text-secondary)] ${!sidebarExpanded ? "justify-center px-0" : ""}`}
         >
           <FolderKanban className="w-[18px] h-[18px] shrink-0" />
@@ -3114,7 +3116,7 @@ export function RevengeStudio({ initialAppsOpen = false, initialApp = null }: { 
           if (c) void handleSelectConversation(c);
           else void handleSelectConversation({
             id, title: "Chat", modelId: selectedModelId, personaId: selectedPersonaId,
-            pinned: false, folder: "General", systemPrompt: null, shareToken: null,
+            pinned: false, folder: "General", projectId: null, systemPrompt: null, shareToken: null,
             createdAt: new Date(), updatedAt: new Date(),
           } as ConversationRow);
         }}
@@ -3191,6 +3193,20 @@ export function RevengeStudio({ initialAppsOpen = false, initialApp = null }: { 
           {toast}
         </div>
       )}
+
+      <ProjectHubsModal
+        open={projectHubsOpen}
+        activeConversationId={activeConvId}
+        activeProjectId={activeConv?.projectId ?? null}
+        onClose={() => setProjectHubsOpen(false)}
+        onAssigned={(projectId, instructions) => {
+          if (!activeConvId) return;
+          setConversations((current) => current.map((conversation) => conversation.id === activeConvId
+            ? { ...conversation, projectId, systemPrompt: instructions || null }
+            : conversation));
+          showToast(projectId ? "Project attached to this chat" : "Project removed from this chat");
+        }}
+      />
 
       <UniversalVaultModal
         open={vaultOpen}

@@ -4,6 +4,7 @@ import { ensureDbSchema, pool } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { hashCustomerKey } from "@/lib/customer-api-keys";
 import registry from "@/lib/revenge-tools-registry.json";
+import { CUSTOMER_API_KEY_REQUESTS_PER_MINUTE } from "@/lib/rate-limit-config";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
     }
     const result = await client.query<{ id: string; expiresAt: Date }>(
       `INSERT INTO "customer_api_keys" ("userId", "name", "prefix", "keyHash", "scopes", "allowedCategories", "requestsPerMinute", "expiresAt")
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 30, now() + ($7::text || ' days')::interval)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, ${CUSTOMER_API_KEY_REQUESTS_PER_MINUTE}, now() + ($7::text || ' days')::interval)
        RETURNING "id", "expiresAt"`,
       [gate.user.id, name, prefix, hashCustomerKey(secret), JSON.stringify(["tools:read", "tools:execute"]), JSON.stringify(storedCategories), String(expiresInDays)],
     );
@@ -91,7 +92,7 @@ export async function POST(request: Request) {
   }
   // This is the only response that ever contains the raw secret.
   return NextResponse.json({
-    key: { id: created.id, name, prefix, scopes: ["tools:read", "tools:execute"], allowedCategories: storedCategories, requestsPerMinute: 30, expiresAt: created.expiresAt },
+    key: { id: created.id, name, prefix, scopes: ["tools:read", "tools:execute"], allowedCategories: storedCategories, requestsPerMinute: CUSTOMER_API_KEY_REQUESTS_PER_MINUTE, expiresAt: created.expiresAt },
     secret,
     warning: "Copy this key now. It cannot be viewed again.",
   }, { status: 201, headers: { "Cache-Control": "no-store" } });

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, ensureDbSchema } from "@/db";
-import { conversations, messages } from "@/db/schema";
+import { conversations, messages, projectHubs } from "@/db/schema";
 import { getOwner, requireUser } from "@/lib/auth";
 import { badId, isUuid, serverError } from "@/lib/api-response";
 import { asc, eq, gte, and } from "drizzle-orm";
@@ -71,6 +71,7 @@ export async function PATCH(
       personaId?: string;
       folder?: string;
       systemPrompt?: string;
+      projectId?: string | null;
     };
 
     const updates: Partial<typeof conversations.$inferInsert> = {
@@ -83,7 +84,15 @@ export async function PATCH(
     if (typeof body.modelId === "string") updates.modelId = body.modelId;
     if (typeof body.personaId === "string") updates.personaId = body.personaId;
     if (typeof body.folder === "string") updates.folder = body.folder;
-    if (typeof body.systemPrompt === "string") updates.systemPrompt = body.systemPrompt;
+    if (typeof body.systemPrompt === "string") updates.systemPrompt = body.systemPrompt.slice(0, 8000);
+    if (body.projectId === null) updates.projectId = null;
+    else if (typeof body.projectId === "string") {
+      if (!isUuid(body.projectId)) return NextResponse.json({ error: "Invalid project id" }, { status: 400 });
+      const [project] = await db.select({ id: projectHubs.id }).from(projectHubs)
+        .where(and(eq(projectHubs.id, body.projectId), eq(projectHubs.ownerKey, existing.ownerKey)));
+      if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      updates.projectId = body.projectId;
+    }
 
     const [updated] = await db
       .update(conversations)

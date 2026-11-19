@@ -5,10 +5,15 @@ import { requireUser } from "@/lib/auth";
 import { authenticateCustomerKey, consumeCustomerKeyRequest, customerKeyRateState, recordCustomerKeyUsage, type CustomerKeyContext } from "@/lib/customer-api-keys";
 import { rateLimitShared } from "@/lib/rate-limit";
 import { discoverEndpoints, enrichEndpoint, validateUrlParameters } from "@/lib/revenge-tools-discovery";
+import { interpretProviderOutcome } from "@/lib/provider-envelope";
+import { resolveAdultSourcePage } from "@/lib/adult-source-resolver";
+import { adultMediaOf } from "@/lib/adult-media";
+import { USER_TOOL_REQUESTS_PER_MINUTE } from "@/lib/rate-limit-config";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 150;
 
+// Provider-specific quotas remain in effect in addition to this user quota.
 const API_BASE = "https://apis.nabeestech.com";
 const API_KEY = () => process.env.NABEES_API_KEY?.trim() || "";
 
@@ -155,7 +160,6 @@ export async function POST(req: Request) {
   }
 
   const providerKey = API_KEY();
-  if (!providerKey) return NextResponse.json({ error: "Tool provider credentials are not configured on the server.", code: "PROVIDER_NOT_CONFIGURED" }, { status: 503 });
   const options = body.options && typeof body.options === "object" ? body.options : {};
   const requestedTimeout = typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) ? options.timeoutMs : 125_000;
   const timeoutMs = Math.min(125_000, Math.max(1_000, Math.floor(requestedTimeout)));
@@ -164,7 +168,7 @@ export async function POST(req: Request) {
   const requestId = randomUUID();
   const rate = customerKey
     ? await consumeCustomerKeyRequest(customerKey)
-    : { ...(await rateLimitShared(`revenge-tools:invoke:${callerId}`, 30, 60_000)), limit: 30 };
+    : { ...(await rateLimitShared(`revenge-tools:invoke:${callerId}`, USER_TOOL_REQUESTS_PER_MINUTE, 60_000)), limit: USER_TOOL_REQUESTS_PER_MINUTE };
   const resetAt = String(Math.ceil(Date.now() / 60_000) * 60);
   if (!rate.ok) {
     return NextResponse.json({ error: "Tool request limit reached. Please retry after the current window." }, {
@@ -173,6 +177,23 @@ export async function POST(req: Request) {
     });
   }
   const rateHeaders = { "X-RateLimit-Limit": String(rate.limit), "X-RateLimit-Remaining": String(rate.remaining), "X-RateLimit-Reset": resetAt };
+  const adultSource = endpoint.id === "xnxx-details" ? "xnxx" : endpoint.id === "xvideos-details" ? "xvideos" : null;
+  const adultPageUrl = typeof supplied.slug === "string" ? supplied.slug : "";
+  if (!providerKey) {
+    const fallback = adultSource ? await resolveAdultSourcePage(adultPageUrl, adultSource) : null;
+    if (fallback) {
+      const fallbackData = fallback.format === "mp4"
+        ? { video_url: fallback.playUrl, download_url: fallback.playUrl, source_page_url: fallback.sourcePageUrl }
+        : { hls_url: fallback.playUrl, source_page_url: fallback.sourcePageUrl };
+      return NextResponse.json({ ok: true, status: 200, elapsedMs: 0, contentType: "application/json", truncated: false, data: fallbackData }, {
+        headers: { ...rateHeaders, "X-Revenge-Ok": "true", "X-Revenge-Upstream-Status": "200", "X-Cache": "MISS", "X-Request-Id": requestId },
+      });
+    }
+    return NextResponse.json({ error: "Tool provider credentials are not configured on the server.", code: "PROVIDER_NOT_CONFIGURED" }, {
+      status: 503,
+      headers: { ...rateHeaders, "X-Revenge-Ok": "false", "X-Revenge-Upstream-Status": "503", "X-Cache": "MISS", "X-Request-Id": requestId },
+    });
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = Date.now();
@@ -199,13 +220,25 @@ export async function POST(req: Request) {
       data = { raw: outputText };
     }
     const elapsedMs = Date.now() - startedAt;
+    const sourceFallback = adultSource && !adultMediaOf(data)
+      ? await resolveAdultSourcePage(adultPageUrl, adultSource)
+      : null;
+    if (sourceFallback) {
+      data = sourceFallback.format === "mp4"
+        ? { video_url: sourceFallback.playUrl, download_url: sourceFallback.playUrl, source_page_url: sourceFallback.sourcePageUrl }
+        : { hls_url: sourceFallback.playUrl, source_page_url: sourceFallback.sourcePageUrl };
+    }
+    const providerOutcome = sourceFallback ? { ok: true } : interpretProviderOutcome(response.ok, data);
+    const resultStatus = sourceFallback ? 200 : response.status;
     if (customerKey) {
-      try { await recordCustomerKeyUsage(customerKey.id, endpoint.id, response.status, elapsedMs); }
+      try { await recordCustomerKeyUsage(customerKey.id, endpoint.id, providerOutcome.providerStatus || resultStatus, elapsedMs); }
       catch { console.error("[customer-api] usage record write failed"); }
     }
     const envelope = {
-      ok: response.ok,
-      status: response.status,
+      ok: providerOutcome.ok,
+      status: resultStatus,
+      ...(providerOutcome.providerStatus ? { providerStatus: providerOutcome.providerStatus } : {}),
+      ...(providerOutcome.error ? { error: providerOutcome.error } : {}),
       elapsedMs,
       contentType,
       truncated,
@@ -213,11 +246,11 @@ export async function POST(req: Request) {
       ...(includeRaw ? { raw: outputText } : {}),
     };
     return NextResponse.json(envelope, {
-      status: strictStatus && response.status !== 204 && response.status !== 304 ? response.status : 200,
+      status: strictStatus && resultStatus !== 204 && resultStatus !== 304 ? resultStatus : 200,
       headers: {
         ...rateHeaders,
-        "X-Revenge-Ok": String(response.ok),
-        "X-Revenge-Upstream-Status": String(response.status),
+        "X-Revenge-Ok": String(providerOutcome.ok),
+        "X-Revenge-Upstream-Status": String(resultStatus),
         "X-Cache": "MISS",
         "X-Request-Id": requestId,
       },

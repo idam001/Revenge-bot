@@ -22,13 +22,29 @@ export function acceptedLicense(licenseUrl: unknown, rights: unknown): { label: 
   try { parsed = new URL(url); } catch { /* rights statement may still identify public domain */ }
   const host = parsed?.hostname.toLowerCase();
   const path = parsed?.pathname.toLowerCase().replace(/\/+$/, "") || "";
-  if (parsed?.protocol === "https:" && host === "creativecommons.org") {
-    if (/^\/publicdomain\/(mark|zero)\/1\.0$/.test(path)) return { label: "Public domain / CC0", url };
-    if (/^\/licenses\/by-sa\/(2\.0|3\.0|4\.0)$/.test(path)) return { label: "Creative Commons BY-SA", url };
-    if (/^\/licenses\/by\/(2\.0|3\.0|4\.0)$/.test(path)) return { label: "Creative Commons BY", url };
+  if (parsed && (parsed.protocol === "https:" || parsed.protocol === "http:") && (host === "creativecommons.org" || host === "www.creativecommons.org")) {
+    // Internet Archive legacy metadata frequently stores CC URLs as HTTP and
+    // uses this older public-domain URI, which now redirects to CC's deed.
+    const secureUrl = `https://creativecommons.org${path}/`;
+    if (/^\/licenses\/publicdomain$/.test(path)) return { label: "Public domain (Archive metadata)", url: secureUrl };
+    if (/^\/publicdomain\/(mark|zero)\/1\.0$/.test(path)) return { label: "Public domain / CC0", url: secureUrl };
+    if (/^\/licenses\/by-sa\/(2\.0|3\.0|4\.0)$/.test(path)) return { label: "Creative Commons BY-SA", url: secureUrl };
+    if (/^\/licenses\/by\/(2\.0|3\.0|4\.0)$/.test(path)) return { label: "Creative Commons BY", url: secureUrl };
   }
   if (!url && /\b(public domain|public-domain|cc0)\b/i.test(rightsText)) return { label: "Public domain (provider rights statement)", url: "https://archive.org/" };
   return null;
+}
+
+const SEARCHABLE_LICENSE_URLS = [
+  "licenses/publicdomain",
+  "publicdomain/mark/1.0",
+  "publicdomain/zero/1.0",
+  ...["by", "by-sa"].flatMap(kind => ["2.0", "3.0", "4.0"].map(version => `licenses/${kind}/${version}`)),
+].flatMap(path => [`http://creativecommons.org/${path}/`, `https://creativecommons.org/${path}/`]);
+
+/** Exact allow-list filter so popular unlicensed uploads cannot crowd licensed results out. */
+export function licensedMovieFilterQuery(): string {
+  return `(${SEARCHABLE_LICENSE_URLS.map(url => `licenseurl:\"${url}\"`).join(" OR ")})`;
 }
 
 function normalizedSize(value: unknown): number | null {

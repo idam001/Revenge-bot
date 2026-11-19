@@ -141,6 +141,7 @@ export function AgentWorkspace({
 }) {
   const [sessions, setSessions] = useState<AgentSessionInfo[]>([]);
   const [e2bReady, setE2bReady] = useState<boolean | null>(null);
+  const [sandboxTest, setSandboxTest] = useState<{ busy: boolean; message: string; ok?: boolean }>({ busy: false, message: "" });
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [taskTitle, setTaskTitle] = useState("New agent task");
@@ -201,6 +202,19 @@ export function AgentWorkspace({
       setE2bReady(data.sandboxConfigured ?? data.e2bConfigured ?? null);
     } catch {
       /* ignore */
+    }
+  }, []);
+
+  const testSandbox = useCallback(async () => {
+    setSandboxTest({ busy: true, message: "Starting disposable sandbox…" });
+    try {
+      const res = await apiFetch("/api/agent/diagnostics", { method: "POST" });
+      const data = await res.json() as { ok?: boolean; sandbox?: string; result?: string; error?: string };
+      if (!res.ok || !data.ok) throw new Error(data.error || `Sandbox check failed (HTTP ${res.status})`);
+      setE2bReady(true);
+      setSandboxTest({ busy: false, ok: true, message: `Sandbox OK (${data.sandbox}). ${data.result ?? ""}` });
+    } catch (err) {
+      setSandboxTest({ busy: false, ok: false, message: err instanceof Error ? err.message : "Sandbox check failed." });
     }
   }, []);
 
@@ -714,6 +728,17 @@ export function AgentWorkspace({
           </div>
           <button
             type="button"
+            onClick={() => void testSandbox()}
+            disabled={sandboxTest.busy}
+            title="Run a real, disposable sandbox write/read smoke test"
+            aria-label="Test sandbox"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-2 text-[11px] text-white/65 hover:bg-white/[0.06] disabled:opacity-50"
+          >
+            {sandboxTest.busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className={`h-3.5 w-3.5 ${sandboxTest.ok ? "text-emerald-400" : ""}`} />}
+            <span className="hidden lg:inline">{sandboxTest.busy ? "Testing" : sandboxTest.ok ? "Sandbox OK" : "Test sandbox"}</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setHistoryOpen((o) => !o)}
             title="Session history"
             aria-label="Session history"
@@ -765,6 +790,11 @@ export function AgentWorkspace({
           <div className="shrink-0 mx-3 sm:mx-5 mt-3 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-[12.5px] leading-relaxed text-amber-200">
             <strong>No sandbox backend is configured.</strong> Agent Mode is available but cannot execute code yet.
             On a Vercel deployment this is automatic; on other hosts, set <code>E2B_API_KEY</code> server-side and restart.
+          </div>
+        )}
+        {sandboxTest.message && !sandboxTest.busy && (
+          <div role="status" className={`shrink-0 mx-3 sm:mx-5 mt-3 rounded-xl border px-4 py-2.5 text-[12px] ${sandboxTest.ok ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-red-400/30 bg-red-400/10 text-red-200"}`}>
+            {sandboxTest.message}
           </div>
         )}
 

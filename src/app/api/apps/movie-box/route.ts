@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { rateLimitShared } from "@/lib/rate-limit";
-import { makePublicMovie } from "@/lib/movie-box";
+import { licensedMovieFilterQuery, makePublicMovie } from "@/lib/movie-box";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 35;
@@ -9,6 +9,8 @@ export const maxDuration = 35;
 const ARCHIVE_SEARCH = "https://archive.org/advancedsearch.php";
 const ARCHIVE_METADATA = "https://archive.org/metadata/";
 const MAX_RESULTS = 8;
+const MAX_CANDIDATES = 24;
+const METADATA_BATCH_SIZE = 8;
 
 export async function POST(request: Request) {
   const gate = await requireUser(request);
@@ -37,13 +39,13 @@ export async function POST(request: Request) {
   // Search only the Internet Archive's public feature-film collection. User
   // input is encoded as a quoted Solr phrase; it never controls the host/URL.
   const escapedQuery = query.replace(/[\\"]/g, "\\$&");
-  const terms = ["collection:feature_films", "mediatype:movies"];
+  const terms = ["collection:feature_films", "mediatype:movies", licensedMovieFilterQuery()];
   if (query) terms.push(`title:\"${escapedQuery}\"`);
   if (year) terms.push(`year:${year}`);
   const searchUrl = new URL(ARCHIVE_SEARCH);
   searchUrl.searchParams.set("q", terms.join(" AND "));
   for (const field of ["identifier", "title", "description", "year", "creator", "licenseurl", "rights"]) searchUrl.searchParams.append("fl[]", field);
-  searchUrl.searchParams.set("rows", String(MAX_RESULTS));
+  searchUrl.searchParams.set("rows", String(MAX_CANDIDATES));
   searchUrl.searchParams.set("page", "1");
   searchUrl.searchParams.set("output", "json");
   searchUrl.searchParams.set("sort[]", "downloads desc");
@@ -58,21 +60,27 @@ export async function POST(request: Request) {
     if (!response.ok) return NextResponse.json({ error: "The public film catalog is temporarily unavailable." }, { status: 502 });
     const payload = await response.json() as { response?: { numFound?: number; docs?: Array<Record<string, unknown>> } };
     const docs = Array.isArray(payload.response?.docs) ? payload.response.docs : [];
-    const results = await Promise.all(docs.map(async (doc) => {
-      const id = typeof doc.identifier === "string" ? doc.identifier : "";
-      if (!/^[A-Za-z0-9._-]{1,200}$/.test(id)) return null;
-      try {
-        const itemResponse = await fetch(`${ARCHIVE_METADATA}${encodeURIComponent(id)}`, {
-          headers: { Accept: "application/json", "User-Agent": "REVENGE-Movie-Box/1.0 (licensed-film discovery)" },
-          signal: AbortSignal.timeout(10_000),
-          cache: "no-store",
-        });
-        if (!itemResponse.ok) return null;
-        const metadata = await itemResponse.json() as Record<string, unknown>;
-        return makePublicMovie(id, doc, metadata);
-      } catch { return null; }
-    }));
-    const items = results.filter((item): item is NonNullable<typeof item> => Boolean(item)).slice(0, MAX_RESULTS);
+    const items: NonNullable<ReturnType<typeof makePublicMovie>>[] = [];
+    // Walk licensed candidates in small bounded batches until playable items are found.
+    for (let offset = 0; offset < docs.length && items.length < MAX_RESULTS; offset += METADATA_BATCH_SIZE) {
+      const batch = docs.slice(offset, offset + METADATA_BATCH_SIZE);
+      const results = await Promise.all(batch.map(async (doc) => {
+        const id = typeof doc.identifier === "string" ? doc.identifier : "";
+        if (!/^[A-Za-z0-9._-]{1,200}$/.test(id)) return null;
+        try {
+          const itemResponse = await fetch(`${ARCHIVE_METADATA}${encodeURIComponent(id)}`, {
+            headers: { Accept: "application/json", "User-Agent": "REVENGE-Movie-Box/1.0 (licensed-film discovery)" },
+            signal: AbortSignal.timeout(5_500),
+            cache: "no-store",
+          });
+          if (!itemResponse.ok) return null;
+          const metadata = await itemResponse.json() as Record<string, unknown>;
+          return makePublicMovie(id, doc, metadata);
+        } catch { return null; }
+      }));
+      items.push(...results.filter((item): item is NonNullable<typeof item> => Boolean(item)));
+    }
+    items.splice(MAX_RESULTS);
     return NextResponse.json({
       items,
       count: items.length,

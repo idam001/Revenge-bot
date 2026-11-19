@@ -50,6 +50,18 @@ export async function ensureDbSchema(): Promise<void> {
       await pool.query(`
         CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+        CREATE TABLE IF NOT EXISTS "project_hubs" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          "ownerKey" text NOT NULL,
+          "name" text NOT NULL,
+          "description" text NOT NULL DEFAULT '',
+          "instructions" text NOT NULL DEFAULT '',
+          "color" text NOT NULL DEFAULT 'ember',
+          "createdAt" timestamp NOT NULL DEFAULT now(),
+          "updatedAt" timestamp NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS "project_hubs_owner_idx" ON "project_hubs" ("ownerKey", "updatedAt" DESC);
+
         CREATE TABLE IF NOT EXISTS "conversations" (
           "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           "title" text NOT NULL DEFAULT 'New Revenge Session',
@@ -57,6 +69,7 @@ export async function ensureDbSchema(): Promise<void> {
           "personaId" text NOT NULL DEFAULT 'unchained',
           "pinned" boolean NOT NULL DEFAULT false,
           "folder" text NOT NULL DEFAULT 'General',
+          "projectId" uuid,
           "systemPrompt" text,
           "createdAt" timestamp NOT NULL DEFAULT now(),
           "updatedAt" timestamp NOT NULL DEFAULT now()
@@ -147,6 +160,7 @@ export async function ensureDbSchema(): Promise<void> {
           "updatedAt" timestamp NOT NULL DEFAULT now()
         );
 
+        ALTER TABLE "conversations" ADD COLUMN IF NOT EXISTS "projectId" uuid;
         ALTER TABLE "messages" ADD COLUMN IF NOT EXISTS "videoUrl" text;
         ALTER TABLE "conversations" ADD COLUMN IF NOT EXISTS "shareToken" text;
         ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "featureFlags" jsonb NOT NULL DEFAULT '{}'::jsonb;
@@ -218,7 +232,7 @@ export async function ensureDbSchema(): Promise<void> {
           "keyHash" text NOT NULL UNIQUE,
           "scopes" jsonb NOT NULL DEFAULT '["tools:execute"]'::jsonb,
           "allowedCategories" jsonb NOT NULL DEFAULT '[]'::jsonb,
-          "requestsPerMinute" integer NOT NULL DEFAULT 30,
+          "requestsPerMinute" integer NOT NULL DEFAULT 300,
           "windowStartedAt" timestamp NOT NULL DEFAULT now(),
           "windowCount" integer NOT NULL DEFAULT 0,
           "totalRequests" integer NOT NULL DEFAULT 0,
@@ -228,6 +242,8 @@ export async function ensureDbSchema(): Promise<void> {
           "createdAt" timestamp NOT NULL DEFAULT now()
         );
         ALTER TABLE "customer_api_keys" ADD COLUMN IF NOT EXISTS "allowedCategories" jsonb NOT NULL DEFAULT '[]'::jsonb;
+        ALTER TABLE "customer_api_keys" ALTER COLUMN "requestsPerMinute" SET DEFAULT 300;
+        UPDATE "customer_api_keys" SET "requestsPerMinute" = 300 WHERE "requestsPerMinute" IN (30, 120);
         CREATE INDEX IF NOT EXISTS "customer_api_keys_user_idx" ON "customer_api_keys" ("userId", "createdAt" DESC);
         CREATE TABLE IF NOT EXISTS "customer_api_usage" (
           "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),

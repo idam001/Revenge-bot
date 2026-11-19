@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import registry from "@/lib/revenge-tools-registry.json";
 import { discoverEndpoints, enrichEndpoint, validatePublicHttpUrl, validateUrlParameters } from "@/lib/revenge-tools-discovery";
-import { acceptedLicense, makePublicMovie, pickLicensedVideoFile } from "@/lib/movie-box";
+import { acceptedLicense, licensedMovieFilterQuery, makePublicMovie, pickLicensedVideoFile } from "@/lib/movie-box";
 
 test("SSRF preflight accepts public HTTPS and rejects metadata, loopback, private ranges, and custom ports", () => {
   assert.equal(validatePublicHttpUrl("https://example.com/path").ok, true);
@@ -49,6 +49,9 @@ test("catalog discovery ranks exact IDs first and paginates without losing total
 
 test("Movie Box only enables source-reported supported licenses and direct video files", () => {
   assert.equal(acceptedLicense("https://creativecommons.org/publicdomain/mark/1.0/", null)?.label, "Public domain / CC0");
+  assert.equal(acceptedLicense("http://creativecommons.org/licenses/publicdomain/", null)?.label, "Public domain (Archive metadata)");
+  assert.equal(acceptedLicense("http://creativecommons.org/licenses/by/4.0/", null)?.url, "https://creativecommons.org/licenses/by/4.0/");
+  assert.ok(licensedMovieFilterQuery().includes('licenseurl:"http://creativecommons.org/licenses/publicdomain/"'));
   assert.equal(acceptedLicense("https://example.com/license", "copyright reserved"), null);
   assert.equal(acceptedLicense("https://evil.example/creativecommons.org/licenses/by/4.0/", ""), null);
   assert.equal(pickLicensedVideoFile([{ name: "movie.mp4", format: "MPEG4", size: "1234" }, { name: "poster.jpg", format: "JPEG" }])?.name, "movie.mp4");

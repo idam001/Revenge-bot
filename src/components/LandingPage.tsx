@@ -136,6 +136,7 @@ const FAQS = [
 
 const FOOTER_LINKS: Array<{ label: string; href: string }> = [
   { label: "Open chat", href: "/chat" },
+  { label: "Host a site", href: "/host" },
   { label: "Tools", href: "/tools" },
   { label: "Developers", href: "/developers" },
   { label: "Capabilities", href: "#capabilities" },
@@ -265,6 +266,7 @@ export function LandingPage() {
           </Link>
 
           <div className="flex items-center gap-2">
+            <Link href="/host" className="hidden rounded-full px-3 py-2 text-[13px] text-white/75 transition hover:bg-white/[0.06] hover:text-white sm:inline-flex">Host a site</Link>
             <Link href="/tools" className="hidden rounded-full px-3 py-2 text-[13px] text-white/75 transition hover:bg-white/[0.06] hover:text-white sm:inline-flex">Tools</Link>
             <Link href="/developers" className="hidden rounded-full px-3 py-2 text-[13px] text-white/75 transition hover:bg-white/[0.06] hover:text-white sm:inline-flex">Developers</Link>
             <Link

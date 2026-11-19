@@ -2,7 +2,8 @@ export type InputField = {
   name: string;
   label: string;
   placeholder?: string;
-  type?: "text" | "url" | "number" | "select" | "textarea";
+  type?: "text" | "url" | "number" | "select" | "textarea" | "file" | "checkbox";
+  accept?: string;
   required?: boolean;
   options?: Array<{ label: string; value: string }>;
 };
@@ -154,9 +155,27 @@ export const APP_EXPERIENCES: Record<string, AppExperience> = {
     ],
   },
   "api-tools": {
-    title: "30+ More API Tools",
-    intro: "Thirty-one extra API-backed tasks for music, video discovery, public posts, web utilities, Pokémon, sports, GitHub, and media. Service availability depends on the upstream provider.",
+    title: "40+ More Tools",
+    intro: "48 tools in one place: 31 provider-backed discovery actions plus 16 built-in browser utilities and an authenticated image-to-public-link uploader. Provider-backed results still depend on upstream availability.",
     actions: [
+      { id: "local-image-url", title: "Image to public URL", description: "Upload a supported image to REVENGE Storage and copy its public link. Anyone with the link can view it.", endpointId: "local-image-public-url", fields: [{ name: "file", label: "Choose image (PNG, JPEG, WebP, or GIF · up to 4 MB)", type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", required: true }, { name: "consent", label: "I own or have permission to share this image, and understand anyone with the link can view it.", type: "checkbox", required: true }] },
+      { id: "local-json-pretty", title: "Format JSON", description: "Validate JSON and format it for reading.", endpointId: "local-json-pretty", fields: [prompt("JSON input", "Paste JSON…", "text")] },
+      { id: "local-json-minify", title: "Minify JSON", description: "Validate JSON and remove unnecessary whitespace.", endpointId: "local-json-minify", fields: [prompt("JSON input", "Paste JSON…", "text")] },
+      { id: "local-csv-json", title: "CSV to JSON", description: "Convert a quoted CSV table into an array of objects.", endpointId: "local-csv-to-json", fields: [prompt("CSV input", "name,city\nAda,Lagos", "text")] },
+      { id: "local-json-csv", title: "JSON to CSV", description: "Turn a JSON array of objects into a downloadable-friendly CSV string.", endpointId: "local-json-to-csv", fields: [prompt("JSON array", "[{\"name\":\"Ada\",\"city\":\"Lagos\"}]", "text")] },
+      { id: "local-url-encode", title: "URL encode", description: "Encode text safely for use in a URL component.", endpointId: "local-url-encode", fields: [prompt("Text to encode", "Text or URL value…", "text")] },
+      { id: "local-url-decode", title: "URL decode", description: "Decode URL-encoded text.", endpointId: "local-url-decode", fields: [prompt("Text to decode", "Paste encoded text…", "text")] },
+      { id: "local-base64-encode", title: "Base64 encode", description: "Encode UTF-8 text, including non-English characters.", endpointId: "local-base64-encode", fields: [prompt("Text to encode", "Write or paste text…", "text")] },
+      { id: "local-base64-decode", title: "Base64 decode", description: "Decode UTF-8 Base64 text.", endpointId: "local-base64-decode", fields: [prompt("Base64 input", "Paste Base64…", "text")] },
+      { id: "local-uuid", title: "Generate UUID", description: "Create a cryptographically random UUID v4.", endpointId: "local-uuid-generate", fields: [] },
+      { id: "local-password", title: "Generate password", description: "Create a random password locally in your browser.", endpointId: "local-password-generate", fields: [{ name: "length", label: "Length", type: "select", options: [16, 20, 32, 48, 64].map(x => ({ label: String(x), value: String(x) })) }], defaults: { length: 20 } },
+      { id: "local-timestamp", title: "Timestamp converter", description: "Convert a Unix timestamp to a date, or a date to Unix seconds and milliseconds.", endpointId: "local-timestamp-convert", fields: [q("Timestamp or date", "1740000000 or 2025-02-19T10:00:00Z", "value"), { name: "mode", label: "Convert", type: "select", options: [{ label: "Unix timestamp to date", value: "timestamp-to-date" }, { label: "Date to Unix timestamp", value: "date-to-unix" }] }], defaults: { mode: "timestamp-to-date" } },
+      { id: "local-color", title: "HEX color converter", description: "Convert HEX colors to RGB and HSL values.", endpointId: "local-color-convert", fields: [q("HEX color", "#37A8E8", "hex")] },
+      { id: "local-contrast", title: "Contrast checker", description: "Check foreground/background contrast against WCAG AA and AAA text targets.", endpointId: "local-contrast-check", fields: [q("Foreground HEX", "#111827", "foreground"), q("Background HEX", "#FFFFFF", "background")] },
+      { id: "local-text-stats", title: "Word & character counter", description: "Count words, characters, lines, and UTF-8 bytes locally.", endpointId: "local-text-stats", fields: [prompt("Text", "Write or paste text…", "text")] },
+      { id: "local-html-escape", title: "Escape HTML", description: "Escape text characters that have special meaning in HTML.", endpointId: "local-html-escape", fields: [prompt("Text to escape", "Paste text…", "text")] },
+      { id: "local-html-unescape", title: "Unescape HTML", description: "Decode common named and numeric HTML entities.", endpointId: "local-html-unescape", fields: [prompt("HTML entities", "&lt;hello&gt;", "text")] },
+
       { id: "extra-github-repo-search", title: "GitHub repository search", description: "Search public GitHub repositories, sorted by stars. Uses GitHub’s public REST API.", endpointId: "github-repo-search", fields: [q("Repository, topic, or developer tool", "Search GitHub repositories", "query"), { name: "language", label: "Language filter (optional)", placeholder: "TypeScript, Python…" }] },
       { id: "extra-apple-music-search", title: "Apple Music search", description: "Search Apple Music catalogs.", endpointId: "apple-music-search", fields: [q("Artist, album, or track", "Search Apple Music"), { name: "country", label: "Storefront", placeholder: "us", required: true }], defaults: { country: "us", limit: 10 } },
       { id: "extra-apple-music-details", title: "Apple Music details", description: "Look up a song, album, artist, or playlist.", endpointId: "apple-music-details", fields: [q("Music URL or resource ID", "Paste a music.apple.com link or ID", "id"), { name: "type", label: "Resource type", type: "select", options: ["song", "album", "artist", "playlist"].map(x => ({ label: x, value: x })) }, { name: "country", label: "Storefront", placeholder: "us" }], defaults: { country: "us" } },
@@ -175,7 +194,7 @@ export const APP_EXPERIENCES: Record<string, AppExperience> = {
       { id: "extra-naijaprey-tag-posts", title: "Posts by tag", description: "Find public posts under a tag slug.", endpointId: "naijaprey-tag-posts", fields: [q("Tag slug", "tag-slug", "slug")], defaults: { page: 1, per_page: 20 } },
       { id: "extra-screen-record", title: "Record a web page", description: "Request a short screen recording of a public page.", endpointId: "webscreenrecord", fields: [url("Public webpage"), { name: "device", label: "Viewport", type: "select", options: [{ label: "Desktop", value: "desktop" }, { label: "Mobile", value: "mobile" }, { label: "Tablet", value: "tablet" }] }], defaults: { device: "desktop", duration: 8000 } },
       { id: "extra-web-zip", title: "Website to ZIP", description: "Package a public website where the provider allows it.", endpointId: "web2zip", fields: [url("Website URL")] },
-      { id: "extra-web-apk", title: "Website to Android package", description: "Request an Android wrapper for a website.", endpointId: "web2apk", fields: [url("Website URL"), { name: "appName", label: "App name", placeholder: "My web app", required: true }, { name: "icon", label: "Public PNG icon URL", type: "url", placeholder: "https://example.com/icon.png", required: true }] },
+      { id: "extra-web-apk", title: "Website to Android package", description: "Request an Android wrapper for a website.", endpointId: "web2apk", method: "POST", fields: [url("Website URL"), { name: "appName", label: "App name", placeholder: "My web app", required: true }, { name: "icon", label: "Public PNG icon URL", type: "url", placeholder: "https://example.com/icon.png", required: true }] },
       { id: "extra-link-resolver", title: "Resolve SFL short link", description: "Resolve a supported SFL short URL.", endpointId: "sfl-link-bypasser", fields: [url("SFL short URL")] },
       { id: "extra-pokemon-list", title: "Browse Pokémon list", description: "Get a page of Pokédex names.", endpointId: "pokemon-list", fields: [{ name: "limit", label: "Number of results", type: "select", options: ["20", "50", "100"].map(x => ({ label: x, value: x })) }], defaults: { limit: 50 } },
       { id: "extra-pokemon-type", title: "Pokémon by type", description: "Explore species of a chosen type.", endpointId: "pokemon-type", fields: [{ name: "name", label: "Type", type: "select", options: ["normal", "fire", "water", "electric", "grass", "ice", "fighting", "poison", "ground", "flying", "psychic", "bug", "rock", "ghost", "dragon", "dark", "steel", "fairy"].map(x => ({ label: x, value: x })) }] },

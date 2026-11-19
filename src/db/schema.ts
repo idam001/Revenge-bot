@@ -22,6 +22,17 @@ export interface AttachmentItem {
   content: string;
 }
 
+export const projectHubs = pgTable("project_hubs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerKey: text("ownerKey").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  instructions: text("instructions").notNull().default(""),
+  color: text("color").notNull().default("ember"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
 export const conversations = pgTable("conversations", {
   id: uuid("id").defaultRandom().primaryKey(),
   ownerKey: text("ownerKey").notNull().default("legacy:public"),
@@ -30,6 +41,7 @@ export const conversations = pgTable("conversations", {
   personaId: text("personaId").notNull().default("unchained"),
   pinned: boolean("pinned").notNull().default(false),
   folder: text("folder").notNull().default("General"),
+  projectId: uuid("projectId"),
   systemPrompt: text("systemPrompt"),
   shareToken: text("shareToken"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -140,6 +152,7 @@ export const agentExecutions = pgTable("agent_executions", {
   completedAt: timestamp("completedAt").defaultNow().notNull(),
 });
 
+export type ProjectHubRow = typeof projectHubs.$inferSelect;
 export type ConversationRow = typeof conversations.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
 export type ProviderKeyRow = typeof providerKeys.$inferSelect;
@@ -181,7 +194,7 @@ export const customerApiKeys = pgTable("customer_api_keys", {
   keyHash: text("keyHash").notNull().unique(),
   scopes: jsonb("scopes").$type<string[]>().notNull().default(["tools:execute"]),
   allowedCategories: jsonb("allowedCategories").$type<string[]>().notNull().default([]),
-  requestsPerMinute: integer("requestsPerMinute").notNull().default(30),
+  requestsPerMinute: integer("requestsPerMinute").notNull().default(300),
   windowStartedAt: timestamp("windowStartedAt").defaultNow().notNull(),
   windowCount: integer("windowCount").notNull().default(0),
   totalRequests: integer("totalRequests").notNull().default(0),

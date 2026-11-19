@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Activity, ArrowLeft, Check, Code2, Copy, KeyRound, Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
+import { CUSTOMER_API_KEY_REQUESTS_PER_MINUTE } from "@/lib/rate-limit-config";
 
 type KeyRow = {
   id: string; name: string; prefix: string; scopes: string[]; requestsPerMinute: number;
@@ -106,7 +107,7 @@ export function DeveloperPortal() {
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Your tools. Your keys. Your code.</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">Create a private credential for your scripts, inspect the supported tool catalog, and track recent usage. Your key is shown once, stored as a one-way hash, and can be revoked at any time.</p>
             <div className="mt-5 flex flex-wrap gap-2 text-xs text-[var(--text-secondary)]">
-              <span className="rounded-full border border-[var(--border-strong)] px-3 py-1.5">30 requests / minute / key</span>
+              <span className="rounded-full border border-[var(--border-strong)] px-3 py-1.5">{CUSTOMER_API_KEY_REQUESTS_PER_MINUTE} requests / minute / key · provider quotas still apply</span>
               <span className="rounded-full border border-[var(--border-strong)] px-3 py-1.5">Maximum 10 active keys</span>
               <span className="rounded-full border border-[var(--border-strong)] px-3 py-1.5">Default expiry: 90 days</span>
             </div>
@@ -138,7 +139,7 @@ export function DeveloperPortal() {
             <div className="mt-4 space-y-2">
               {loading ? <div className="flex items-center gap-2 py-8 text-sm text-[var(--text-muted)]"><Loader2 className="animate-spin" size={16}/>Loading keys…</div> : keys.length === 0 ? <div className="rounded-xl border border-dashed border-[var(--border-strong)] px-4 py-8 text-center text-sm text-[var(--text-muted)]">No keys yet. Generate one to connect a script.</div> : keys.map(key => <article key={key.id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-main)] p-3.5">
                 <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="truncate text-sm">{key.name}</strong><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${key.revokedAt || (key.expiresAt && Date.parse(key.expiresAt) <= now) ? "bg-red-500/15 text-red-300" : "bg-emerald-500/15 text-emerald-300"}`}>{key.revokedAt ? "Revoked" : key.expiresAt && Date.parse(key.expiresAt) <= now ? "Expired" : "Active"}</span></div><code className="mt-1 block text-xs text-[var(--text-muted)]">{key.prefix}</code></div>{!key.revokedAt && <button disabled={busy} onClick={() => void revoke(key)} title="Revoke key" className="rounded-lg p-2 text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"><Trash2 size={16}/></button>}</div>
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--text-muted)]"><span>{key.totalRequests.toLocaleString()} total calls</span><span>{key.requestsLast30Days.toLocaleString()} in 30 days</span><span>{key.allowedCategories?.length ? `${key.allowedCategories.length} categories` : "All categories"}</span><span>30/min limit</span></div>
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--text-muted)]"><span>{key.totalRequests.toLocaleString()} total calls</span><span>{key.requestsLast30Days.toLocaleString()} in 30 days</span><span>{key.allowedCategories?.length ? `${key.allowedCategories.length} categories` : "All categories"}</span><span>{key.requestsPerMinute.toLocaleString()}/min limit</span></div>
                 <div className="mt-1 text-[11px] text-[var(--text-muted)]">{key.lastUsedAt ? `Last used ${new Date(key.lastUsedAt).toLocaleString()}` : `Created ${new Date(key.createdAt).toLocaleDateString()}`}{key.expiresAt ? ` · Expires ${new Date(key.expiresAt).toLocaleDateString()}` : ""}</div>
               </article>)}
             </div>
